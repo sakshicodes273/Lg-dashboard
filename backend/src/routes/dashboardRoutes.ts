@@ -1,9 +1,17 @@
 import { Router } from 'express'
-import { requireAuth, type AuthenticatedRequest } from '../middleware/authMiddleware.js'
+import { requireAuth } from '../middleware/authMiddleware.js'
+import { requireTenant, type TenantRequest } from '../middleware/tenantMiddleware.js'
 
 const dashboardRoutes = Router()
 
-dashboardRoutes.get('/', requireAuth, (req: AuthenticatedRequest, res) => {
+dashboardRoutes.use(requireAuth, requireTenant)
+
+dashboardRoutes.get('/', (req: TenantRequest, res) => {
+  if (!req.tenantConnection) {
+    res.status(503).json({ message: 'Organization database is unavailable' })
+    return
+  }
+
   res.json({
     organizationId: req.auth?.organizationId,
     metrics: {

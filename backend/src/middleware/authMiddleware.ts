@@ -20,9 +20,24 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   }
 
   try {
-    const payload = jwt.verify(token, secret) as AuthPayload
-    if (!payload.userId || !payload.organizationId || !payload.role) throw new Error('Invalid token')
-    req.auth = payload
+    const payload = jwt.verify(token, secret)
+    if (
+      typeof payload === 'string'
+      || typeof payload.userId !== 'string'
+      || typeof payload.organizationId !== 'string'
+      || typeof payload.role !== 'string'
+      || !payload.userId
+      || !payload.organizationId
+      || !payload.role
+    ) {
+      throw new Error('Invalid token')
+    }
+
+    req.auth = {
+      userId: payload.userId,
+      organizationId: payload.organizationId,
+      role: payload.role,
+    }
     next()
   } catch {
     res.clearCookie('ledgerguard_session', { path: '/' })
