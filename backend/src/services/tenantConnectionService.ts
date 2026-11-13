@@ -1,4 +1,6 @@
 import mongoose, { type Connection } from 'mongoose'
+import { getMongoUri } from '../config/database.js'
+import { getOrCreateConnection } from '../utils/connectionManager.js'
 
 const organizationIdPattern = /^[\da-f]{8}-([\da-f]{4}-){3}[\da-f]{12}$/i
 
@@ -17,11 +19,17 @@ function getTenantDatabaseName(organizationId: string): string {
   return `tenant_${organizationId.replaceAll('-', '').toLowerCase()}`
 }
 
-export function getTenantConnection(organizationId: string): Connection {
-  if (mongoose.connection.readyState !== 1) {
-    throw new TenantConnectionUnavailableError('The database connection is not ready')
-  }
-
+export async function getTenantConnection(organizationId: string): Promise<Connection> {
   const databaseName = getTenantDatabaseName(organizationId)
-  return mongoose.connection.useDb(databaseName, { useCache: true })
+  try {
+    return await getOrCreateConnection(databaseName, () =>
+      mongoose.createConnection(getMongoUri(), {
+        dbName: databaseName,
+        serverSelectionTimeoutMS: 10000,
+      }),
+    )
+  } catch (error) {
+    if (error instanceof TenantConnectionUnavailableError) throw error
+    throw new TenantConnectionUnavailableError('Unable to connect to the organization database')
+  }
 }

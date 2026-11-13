@@ -3,19 +3,19 @@ import type { AuthenticatedRequest } from './authMiddleware.js'
 import { getTenantConnection, TenantConnectionUnavailableError } from '../services/tenantConnectionService.js'
 
 export interface TenantRequest extends AuthenticatedRequest {
-  tenantConnection?: ReturnType<typeof getTenantConnection>
+  tenantConnection?: Awaited<ReturnType<typeof getTenantConnection>>
 }
 
-export function requireTenant(req: TenantRequest, res: Response, next: NextFunction): void {
+export async function requireTenant(req: TenantRequest, res: Response, next: NextFunction): Promise<void> {
   const organizationId = req.auth?.organizationId
   if (!organizationId) {
     res.status(401).json({ message: 'Authentication required' })
     return
   }
 
+  let connection: TenantRequest['tenantConnection']
   try {
-    req.tenantConnection = getTenantConnection(organizationId)
-    next()
+    connection = await getTenantConnection(organizationId)
   } catch (error) {
     if (error instanceof TenantConnectionUnavailableError) {
       console.error('Unable to select organization database:', error.message)
@@ -24,5 +24,9 @@ export function requireTenant(req: TenantRequest, res: Response, next: NextFunct
     }
 
     next(error)
+    return
   }
+
+  req.tenantConnection = connection
+  next()
 }
