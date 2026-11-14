@@ -5,6 +5,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import authRoutes from './routes/authRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
+import { checkRedisHealth } from './services/redisService.js'
 
 const app = express()
 
@@ -15,6 +16,15 @@ app.use(cookieParser())
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'LedgerGuard Backend Running' })
+})
+app.get('/api/health/redis', async (_req, res) => {
+  try {
+    await checkRedisHealth()
+    res.json({ status: 'ok' })
+  } catch (error) {
+    console.error('Redis health check failed:', error)
+    res.status(503).json({ status: 'unhealthy' })
+  }
 })
 app.use('/api/auth', authRoutes)
 app.use('/api/dashboard', dashboardRoutes)
