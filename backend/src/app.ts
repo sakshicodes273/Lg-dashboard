@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import helmet from 'helmet'
 import authRoutes from './routes/authRoutes.js'
+import billingRoutes from './routes/billingRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import { checkRedisHealth } from './services/redisService.js'
 
@@ -27,6 +28,7 @@ app.get('/api/health/redis', async (_req, res) => {
   }
 })
 app.use('/api/auth', authRoutes)
+app.use('/api/billing', billingRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

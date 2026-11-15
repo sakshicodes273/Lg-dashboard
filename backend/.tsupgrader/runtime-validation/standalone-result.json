@@ -1,0 +1,84 @@
+{
+  "planHash": "ddfb9d4e89a20e1f8141acac2fcbc9ddd20b43385366832616acd87c762bab23",
+  "phase": "standalone",
+  "recordedAtUtc": "2026-11-15T14:22:31.3715745Z",
+  "retryCount": 0,
+  "resetBaseline": false,
+  "complete": true,
+  "result": {
+    "setupSucceeded": true,
+    "setupDurationMs": 16285,
+    "setupFailureOutput": null,
+    "assertions": [
+      {
+        "name": "backend-build",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\r\n\u003E ledgerguard-backend@1.0.0 build\r\n\u003E tsc -p tsconfig.json\r\n\r\n",
+        "durationMs": 6864
+      },
+      {
+        "name": "tests-pass",
+        "kind": "process",
+        "verificationMethod": "test-results",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\r\n\u003E ledgerguard-backend@1.0.0 test\r\n\u003E vitest run\r\n\r\n\r\n RUN  v5.1.0 C:/Users/guest123/OneDrive/Desktop/Lg-dashboard/backend\r\n\r\n\r\n Test Files  1 passed (1)\r\n      Tests  4 passed (4)\r\n   Start at  19:52:25\r\n   Duration  5.11s (import 85%, transform 8%, tests 6%)\r\n\r\n",
+        "durationMs": 7781,
+        "testResults": {
+          "testFramework": "vitest",
+          "runnerDetectedFrom": "package_json",
+          "testsTotal": 4,
+          "testsPassed": 4,
+          "testsFailed": 0,
+          "testsSkipped": 0,
+          "parseFailed": false
+        }
+      }
+    ],
+    "executions": [
+      {
+        "source": "setup[0]",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "ci"
+        ],
+        "cwd": "C:\\Users\\guest123\\OneDrive\\Desktop\\Lg-dashboard\\backend",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "backend-build",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "run",
+          "build"
+        ],
+        "cwd": "C:\\Users\\guest123\\OneDrive\\Desktop\\Lg-dashboard\\backend",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "tests-pass",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "test"
+        ],
+        "cwd": "C:\\Users\\guest123\\OneDrive\\Desktop\\Lg-dashboard\\backend",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      }
+    ]
+  }
+}
