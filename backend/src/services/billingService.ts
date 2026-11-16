@@ -6,9 +6,10 @@ import {
   type BillingTransactionRecord,
 } from '../models/BillingTransaction.js'
 
-const lockTtlMs = 30000
+const lockTtlMs = 90000
 const lockWaitMs = 5000
 const lockPollIntervalMs = 50
+const transactionMaxCommitTimeMs = 5000
 
 export interface CreateBillingTransactionInput {
   idempotencyKey: string
@@ -87,21 +88,44 @@ export async function createBillingTransaction(
     const lockToken = await acquireLock(lockKey, lockTtlMs)
     if (lockToken) {
       try {
-        const transaction = await BillingTransaction.create({
-          ...input,
-          transactionId: randomUUID(),
-          currency: input.currency.toUpperCase(),
-          status: 'pending',
-        })
-        return { transaction, replayed: false }
-      } catch (error) {
-        if (!duplicateKeyError(error)) throw error
+        const session = await connection.startSession()
+        try {
+          session.startTransaction({ maxCommitTimeMS: transactionMaxCommitTimeMs })
+          const [transaction] = await BillingTransaction.create([{
+            ...input,
+            transactionId: randomUUID(),
+            currency: input.currency.toUpperCase(),
+            status: 'pending',
+          }], { session })
+          await session.commitTransaction()
+          return { transaction, replayed: false }
+        } catch (error) {
+          if (session.inTransaction()) {
+            try {
+              await session.abortTransaction()
+            } catch (abortError) {
+              console.error('Unable to abort failed billing transaction:', abortError)
+            }
+          }
 
-        const duplicate = await BillingTransaction.findOne(lookup)
-        if (!duplicate) throw error
-        return { transaction: duplicate, replayed: true }
+          if (!duplicateKeyError(error)) throw error
+
+          const duplicate = await BillingTransaction.findOne(lookup)
+          if (!duplicate) throw error
+          return { transaction: duplicate, replayed: true }
+        } finally {
+          try {
+            await session.endSession()
+          } catch (error) {
+            console.error('Unable to end billing transaction session:', error)
+          }
+        }
       } finally {
-        await releaseLock(lockKey, lockToken)
+        try {
+          await releaseLock(lockKey, lockToken)
+        } catch (error) {
+          console.error('Unable to release billing lock:', error)
+        }
       }
     }
 
