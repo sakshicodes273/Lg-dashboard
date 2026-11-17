@@ -29,7 +29,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <span className="nav-caption">WORKSPACE</span>
         <nav className="main-nav" aria-label="Main navigation">
           <NavLink to="/" end><LayoutDashboard size={17} /> Overview</NavLink>
-          <NavLink to="/billing"><CreditCard size={17} /> Billing ledger <span className="nav-count">4</span></NavLink>
+          <NavLink to="/billing"><CreditCard size={17} /> Billing ledger</NavLink>
           <a href="#resources"><Boxes size={17} /> Resources</a>
           <a href="#activity"><Activity size={17} /> Activity</a>
         </nav>

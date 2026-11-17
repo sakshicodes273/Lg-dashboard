@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { DashboardLayout } from './layouts/DashboardLayout'
+import { BillingLedger } from './pages/BillingLedger'
 import { Dashboard } from './pages/Dashboard'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -14,7 +15,7 @@ function ProtectedRoutes() {
     <DashboardLayout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/billing" element={<Dashboard activeView="billing" />} />
+        <Route path="/billing" element={<BillingLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </DashboardLayout>

@@ -24,6 +24,23 @@ export interface BillingTransactionResult {
   replayed: boolean
 }
 
+export interface ListBillingTransactionsInput {
+  organizationId: string
+  status?: BillingTransactionRecord['status']
+  startDate?: Date
+  endDate?: Date
+  page: number
+  limit: number
+}
+
+export interface BillingTransactionPage {
+  transactions: BillingTransactionRecord[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
 export class InvalidBillingRequestError extends Error {
   constructor(message: string) {
     super(message)
@@ -36,6 +53,49 @@ export class BillingLockUnavailableError extends Error {
     super('A transaction with this idempotency key is still being processed')
     this.name = 'BillingLockUnavailableError'
   }
+}
+
+export async function listBillingTransactions(
+  connection: Connection,
+  input: ListBillingTransactionsInput,
+): Promise<BillingTransactionPage> {
+  const BillingTransaction = getBillingTransactionModel(connection)
+  const filter: Record<string, unknown> = { organizationId: input.organizationId }
+
+  if (input.status) filter.status = input.status
+  if (input.startDate || input.endDate) {
+    filter.createdAt = {
+      ...(input.startDate ? { $gte: input.startDate } : {}),
+      ...(input.endDate ? { $lt: input.endDate } : {}),
+    }
+  }
+
+  const [transactions, total] = await Promise.all([
+    BillingTransaction.find(filter)
+      .sort({ createdAt: -1, transactionId: 1 })
+      .skip((input.page - 1) * input.limit)
+      .limit(input.limit)
+      .lean()
+      .exec(),
+    BillingTransaction.countDocuments(filter).exec(),
+  ])
+
+  return {
+    transactions,
+    page: input.page,
+    limit: input.limit,
+    total,
+    totalPages: Math.ceil(total / input.limit),
+  }
+}
+
+export async function getBillingTransaction(
+  connection: Connection,
+  organizationId: string,
+  transactionId: string,
+): Promise<BillingTransactionRecord | null> {
+  const BillingTransaction = getBillingTransactionModel(connection)
+  return BillingTransaction.findOne({ organizationId, transactionId }).lean().exec()
 }
 
 function validateInput(input: CreateBillingTransactionInput): void {

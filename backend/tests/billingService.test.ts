@@ -37,10 +37,23 @@ const mocks = vi.hoisted(() => {
 
   const billingModel = {
     init: vi.fn(async () => undefined),
-    findOne: vi.fn(async ({ organizationId, idempotencyKey }: {
-      organizationId: string
-      idempotencyKey: string
-    }) => transactions.get(transactionKey(organizationId, idempotencyKey)) ?? null),
+    findOne: vi.fn((filter: Record<string, unknown>) => {
+      const found = Promise.resolve(Array.from(transactions.values()).find((transaction) =>
+        Object.entries(filter).every(([key, value]) => transaction[key] === value),
+      ) ?? null)
+      return {
+        then: found.then.bind(found),
+        lean: vi.fn(() => ({ exec: () => found })),
+      }
+    }),
+    find: vi.fn(() => ({
+      sort: vi.fn().mockReturnThis(),
+      skip: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      lean: vi.fn().mockReturnThis(),
+      exec: vi.fn(async () => []),
+    })),
+    countDocuments: vi.fn(() => ({ exec: vi.fn(async () => 0) })),
     create: vi.fn(async (
       [input]: [Record<string, unknown>],
       options?: { session?: typeof session },
@@ -131,6 +144,8 @@ describe('createBillingTransaction', () => {
     mocks.heldLocks.clear()
     mocks.billingModel.init.mockClear()
     mocks.billingModel.findOne.mockClear()
+    mocks.billingModel.find.mockClear()
+    mocks.billingModel.countDocuments.mockClear()
     mocks.billingModel.create.mockClear()
     mocks.acquireLock.mockClear()
     mocks.releaseLock.mockClear()
@@ -190,6 +205,28 @@ describe('createBillingTransaction', () => {
     expect(mocks.billingModel.create).toHaveBeenCalledTimes(2)
   })
 
+  it('lists transactions with organization, status, date, and pagination filters', async () => {
+    const { listBillingTransactions } = await import('../src/services/billingService.js')
+    const startDate = new Date('2026-10-01T00:00:00.000Z')
+    const endDate = new Date('2026-11-01T00:00:00.000Z')
+
+    const result = await listBillingTransactions(connection, {
+      organizationId: 'org-1',
+      status: 'successful',
+      startDate,
+      endDate,
+      page: 2,
+      limit: 10,
+    })
+
+    expect(mocks.billingModel.find).toHaveBeenCalledWith({
+      organizationId: 'org-1',
+      status: 'successful',
+      createdAt: { $gte: startDate, $lt: endDate },
+    })
+    expect(result).toEqual({ transactions: [], page: 2, limit: 10, total: 0, totalPages: 0 })
+  })
+
   it('does not turn a committed transaction into a failed request if lock release errors', async () => {
     mocks.releaseLock.mockRejectedValueOnce(new Error('Redis unavailable'))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -246,6 +283,78 @@ describe('createBillingTransaction', () => {
       expect(replayResponse.status).toBe(200)
       expect(replay.replayed).toBe(true)
       expect(replay.transaction.transactionId).toBe(payload.transaction.transactionId)
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve())
+      })
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('validates ledger query parameters and applies the authenticated organization scope', async () => {
+    const secret = 'billing-test-secret-with-at-least-32-characters'
+    vi.stubEnv('JWT_SECRET', secret)
+    const token = jwt.sign(
+      { userId: 'user-1', organizationId: 'org-1', role: 'owner' },
+      secret,
+    )
+    const server = app.listen(0)
+
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve))
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port')
+      const request = (query: string) => fetch(
+        `http://127.0.0.1:${address.port}/api/billing/transactions${query}`,
+        { headers: { Connection: 'close', Cookie: `ledgerguard_session=${token}` } },
+      )
+
+      const response = await request('?status=successful&startDate=2026-10-01&endDate=2026-10-31&page=2&limit=10')
+      expect(response.status).toBe(200)
+      expect(mocks.billingModel.find).toHaveBeenCalledWith({
+        organizationId: 'org-1',
+        status: 'successful',
+        createdAt: {
+          $gte: new Date('2026-10-01T00:00:00.000Z'),
+          $lt: new Date('2026-11-01T00:00:00.000Z'),
+        },
+      })
+
+      const invalid = await request('?status=processing')
+      expect(invalid.status).toBe(400)
+      expect(mocks.billingModel.find).toHaveBeenCalledTimes(1)
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve())
+      })
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('retrieves transaction details using both transaction and organization IDs', async () => {
+    const secret = 'billing-test-secret-with-at-least-32-characters'
+    vi.stubEnv('JWT_SECRET', secret)
+    const token = jwt.sign(
+      { userId: 'user-1', organizationId: 'org-1', role: 'owner' },
+      secret,
+    )
+    const server = app.listen(0)
+    const transactionId = 'c4b8e4d7-1163-4f05-a448-520613bd934a'
+
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve))
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port')
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/billing/transactions/${transactionId}`,
+        { headers: { Connection: 'close', Cookie: `ledgerguard_session=${token}` } },
+      )
+
+      expect(response.status).toBe(404)
+      expect(mocks.billingModel.findOne).toHaveBeenCalledWith({
+        organizationId: 'org-1',
+        transactionId,
+      })
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve())

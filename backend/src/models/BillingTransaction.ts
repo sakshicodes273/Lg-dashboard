@@ -34,6 +34,7 @@ const billingTransactionSchema = new Schema<BillingTransactionRecord>(
 
 billingTransactionSchema.index({ transactionId: 1 }, { unique: true })
 billingTransactionSchema.index({ organizationId: 1, idempotencyKey: 1 }, { unique: true })
+billingTransactionSchema.index({ organizationId: 1, createdAt: -1 })
 
 export function getBillingTransactionModel(connection: Connection): Model<BillingTransactionRecord> {
   return connection.models.BillingTransaction

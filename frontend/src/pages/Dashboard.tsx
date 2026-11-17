@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, Boxes, CircleDollarSign, Download, Gauge, HardDrive, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { apiRequest } from '../services/api'
 import type { DashboardMetrics } from '../types/auth'
 
@@ -13,7 +14,7 @@ const fallbackMetrics: DashboardMetrics = {
 const spendBars = [36, 48, 41, 58, 52, 69, 61, 77, 65, 87, 72, 94]
 const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
-export function Dashboard({ activeView = 'overview' }: { activeView?: 'overview' | 'billing' }) {
+export function Dashboard() {
   const [metrics, setMetrics] = useState(fallbackMetrics)
   const [loading, setLoading] = useState(false)
 
@@ -35,11 +36,9 @@ export function Dashboard({ activeView = 'overview' }: { activeView?: 'overview'
   return (
     <>
       <div className="page-heading">
-        <div><span className="section-label">{activeView === 'billing' ? 'FINANCE' : 'WEDNESDAY, NOVEMBER 11, 2026'}</span><h1>{activeView === 'billing' ? 'Billing ledger' : 'Overview'}</h1><p>{activeView === 'billing' ? 'A clear record of your cloud costs.' : 'Your cloud footprint, at a glance.'}</p></div>
-        <div className="heading-actions"><button className="quiet-button" type="button" onClick={() => window.location.reload()} title="Refresh data"><RefreshCw size={15} /> Refresh</button><button className="export-button" type="button"><Download size={15} /> Export report</button></div>
+        <div><span className="section-label">WEDNESDAY, NOVEMBER 11, 2026</span><h1>Overview</h1><p>Your cloud footprint, at a glance.</p></div>
+        <div className="heading-actions"><button className="quiet-button" type="button" onClick={() => window.location.reload()} title="Refresh data"><RefreshCw size={15} /> Refresh</button><Link className="export-button dashboard-billing-link" to="/billing">Billing ledger</Link><button className="export-button" type="button"><Download size={15} /> Export report</button></div>
       </div>
-
-      {activeView === 'billing' && <div className="ledger-notice"><ShieldCheck size={19} /><div><strong>Ledger view is ready to connect</strong><span>Sample totals are shown until a billing provider is connected.</span></div><span className="demo-tag">PREVIEW DATA</span></div>}
 
       <section className="metric-grid" aria-label="Usage summary">
         {cards.map(({ label, metric, icon: Icon, note, positive }, index) => (
