@@ -1,4 +1,7 @@
-const apiBase = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
+const defaultApiBase = import.meta.env.DEV
+  ? `http://${window.location.hostname}:4000/api`
+  : 'http://localhost:4000/api'
+const apiBase = import.meta.env.VITE_API_URL ?? defaultApiBase
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {

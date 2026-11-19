@@ -9,9 +9,13 @@ import dashboardRoutes from './routes/dashboardRoutes.js'
 import { checkRedisHealth } from './services/redisService.js'
 
 const app = express()
+const frontendOrigins = [
+  process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  ...(process.env.NODE_ENV === 'production' ? [] : ['http://127.0.0.1:5173']),
+]
 
 app.use(helmet())
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173', credentials: true }))
+app.use(cors({ origin: frontendOrigins, credentials: true }))
 app.use(express.json({ limit: '10kb' }))
 app.use(cookieParser())
 
