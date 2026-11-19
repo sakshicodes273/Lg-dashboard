@@ -16,6 +16,12 @@ Billing records are stored in the organization's tenant database. A Redis lock s
 
 Each new billing record is written in a MongoDB transaction using a Mongoose session. The session is committed only after the record is created; operation and commit errors abort the transaction, and the session is ended in either case. The Redis lock is released using its ownership token after the transaction finishes. MongoDB must run as a replica set (or on a supported sharded cluster); standalone servers cannot process billing requests.
 
+## Usage analytics data
+
+Usage events are stored as `UsageRecord` documents in the authenticated organization's tenant database. Each record includes its organization ID, resource type (`compute`, `storage`, `api_requests`, or `network`), usage amount and unit, cost and ISO-style three-letter currency, and recorded timestamp. Resource name is optional for events that can be attributed to an individual resource. Mongoose timestamps also supply `createdAt` and `updatedAt`.
+
+The analytics service creates records, lists them with organization/date/resource filters, and aggregates usage by resource type, unit, and currency. Separate units and currencies are never summed together. Compound indexes on organization plus recorded date and organization plus resource type plus recorded date support tenant-scoped time-series reporting. A separate `ResourceUsage` collection is intentionally not used; the single event record is the source for both resource-level and organization-level aggregation.
+
 `GET /api/billing/transactions` returns the authenticated organization's transactions, newest first. It supports `status` (`pending`, `successful`, or `failed`), `startDate` and `endDate` (`YYYY-MM-DD`, inclusive), `page` (default `1`), and `limit` (default `20`, maximum `100`). The response contains `transactions` and pagination metadata (`page`, `limit`, `total`, and `totalPages`). Unknown or invalid query parameters return `400`. `GET /api/billing/transactions/:transactionId` returns a transaction only when it belongs to the authenticated organization; unknown IDs return `404`.
 
 For local development, start MongoDB with replica-set support, for example `mongod --replSet rs0 --bind_ip localhost --dbpath <data-directory>`, then initialize the set once with `mongosh --eval "rs.initiate()"`. Set `MONGODB_URI` to `mongodb://127.0.0.1:27017/ledgerguard?replicaSet=rs0` (as in `.env.example`). For a hosted database, use its replica-set or sharded-cluster connection string.
