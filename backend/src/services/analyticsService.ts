@@ -37,6 +37,29 @@ export interface UsageSummaryInput {
   endDate?: Date
 }
 
+export interface DashboardUsageTrendPoint {
+  date: string
+  records: number
+}
+
+export interface DashboardAnalytics {
+  resourceConsumption: UsageSummary[]
+  usageTrend: DashboardUsageTrendPoint[]
+  activeResources: number
+  utilizationPercent: number | null
+}
+
+function createUsageMatch(input: UsageSummaryInput): Record<string, unknown> {
+  const match: Record<string, unknown> = { organizationId: input.organizationId }
+  if (input.startDate || input.endDate) {
+    match.recordedAt = {
+      ...(input.startDate ? { $gte: input.startDate } : {}),
+      ...(input.endDate ? { $lt: input.endDate } : {}),
+    }
+  }
+  return match
+}
+
 export async function createUsageRecord(
   connection: Connection,
   input: CreateUsageRecordInput,
@@ -83,16 +106,8 @@ export async function summarizeUsage(
   connection: Connection,
   input: UsageSummaryInput,
 ): Promise<UsageSummary[]> {
-  const match: Record<string, unknown> = { organizationId: input.organizationId }
-  if (input.startDate || input.endDate) {
-    match.recordedAt = {
-      ...(input.startDate ? { $gte: input.startDate } : {}),
-      ...(input.endDate ? { $lt: input.endDate } : {}),
-    }
-  }
-
   return getUsageRecordModel(connection).aggregate<UsageSummary>([
-    { $match: match },
+    { $match: createUsageMatch(input) },
     {
       $group: {
         _id: {
@@ -116,4 +131,43 @@ export async function summarizeUsage(
     },
     { $sort: { resourceType: 1, usageUnit: 1, currency: 1 } },
   ]).exec()
+}
+
+export async function getDashboardAnalytics(
+  connection: Connection,
+  input: UsageSummaryInput,
+): Promise<DashboardAnalytics> {
+  const UsageRecordModel = getUsageRecordModel(connection)
+  const match = createUsageMatch(input)
+  const [resourceConsumption, resourceNames, usageTrend] = await Promise.all([
+    summarizeUsage(connection, input),
+    UsageRecordModel.distinct('resourceName', {
+      ...match,
+      resourceName: { $type: 'string', $ne: '' },
+    }),
+    UsageRecordModel.aggregate<DashboardUsageTrendPoint>([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$recordedAt',
+              timezone: 'UTC',
+            },
+          },
+          records: { $sum: 1 },
+        },
+      },
+      { $project: { _id: 0, date: '$_id', records: 1 } },
+      { $sort: { date: 1 } },
+    ]).exec(),
+  ])
+
+  return {
+    resourceConsumption,
+    usageTrend,
+    activeResources: resourceNames.length,
+    utilizationPercent: null,
+  }
 }

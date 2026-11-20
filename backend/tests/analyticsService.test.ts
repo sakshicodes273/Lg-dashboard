@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
       exec: vi.fn(async () => createdRecords.filter((record) => matchesFilter(record, filter)).length),
     })),
     aggregate: vi.fn(() => ({ exec: vi.fn(async () => []) })),
+    distinct: vi.fn(async () => ['resource-1']),
   }
 
   return { createdRecords, findQuery, usageModel }
@@ -38,6 +39,7 @@ import {
   createUsageRecord,
   listUsageRecords,
   summarizeUsage,
+  getDashboardAnalytics,
 } from '../src/services/analyticsService.js'
 
 const connection = {} as Parameters<typeof createUsageRecord>[0]
@@ -49,6 +51,8 @@ describe('analyticsService', () => {
     mocks.usageModel.find.mockClear()
     mocks.usageModel.countDocuments.mockClear()
     mocks.usageModel.aggregate.mockClear()
+    mocks.usageModel.distinct.mockReset()
+    mocks.usageModel.distinct.mockResolvedValue(['resource-1'])
     mocks.findQuery.exec.mockClear()
   })
 
@@ -123,6 +127,53 @@ describe('analyticsService', () => {
             usageUnit: '$usageUnit',
             currency: '$currency',
           },
+        }),
+      }),
+    ]))
+  })
+
+  it('returns empty dashboard analytics when the tenant has no records', async () => {
+    const startDate = new Date('2026-10-01T00:00:00.000Z')
+    const endDate = new Date('2026-11-01T00:00:00.000Z')
+    mocks.usageModel.distinct.mockResolvedValue([])
+
+    const result = await getDashboardAnalytics(connection, {
+      organizationId: 'org-1',
+      startDate,
+      endDate,
+    })
+
+    expect(result).toEqual({
+      resourceConsumption: [],
+      usageTrend: [],
+      activeResources: 0,
+      utilizationPercent: null,
+    })
+  })
+
+  it('limits named resource counts and daily usage to the requested organization and period', async () => {
+    const startDate = new Date('2026-10-01T00:00:00.000Z')
+    const endDate = new Date('2026-11-01T00:00:00.000Z')
+
+    const result = await getDashboardAnalytics(connection, {
+      organizationId: 'org-1',
+      startDate,
+      endDate,
+    })
+
+    expect(result.activeResources).toBe(1)
+    expect(mocks.usageModel.distinct).toHaveBeenCalledWith('resourceName', {
+      organizationId: 'org-1',
+      recordedAt: { $gte: startDate, $lt: endDate },
+      resourceName: { $type: 'string', $ne: '' },
+    })
+    expect(mocks.usageModel.aggregate).toHaveBeenCalledWith(expect.arrayContaining([
+      { $match: { organizationId: 'org-1', recordedAt: { $gte: startDate, $lt: endDate } } },
+      expect.objectContaining({
+        $group: expect.objectContaining({
+          _id: expect.objectContaining({
+            $dateToString: expect.objectContaining({ date: '$recordedAt', timezone: 'UTC' }),
+          }),
         }),
       }),
     ]))

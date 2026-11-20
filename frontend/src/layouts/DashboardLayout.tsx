@@ -1,4 +1,4 @@
-import { Activity, ArrowUpRight, Boxes, CircleHelp, CreditCard, LayoutDashboard, LogOut, Settings2 } from 'lucide-react'
+import { ArrowUpRight, Boxes, CircleHelp, CreditCard, LayoutDashboard, LogOut, Settings2 } from 'lucide-react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Brand } from '../components/Brand'
@@ -31,7 +31,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           <NavLink to="/" end><LayoutDashboard size={17} /> Overview</NavLink>
           <NavLink to="/billing"><CreditCard size={17} /> Billing ledger</NavLink>
           <a href="#resources"><Boxes size={17} /> Resources</a>
-          <a href="#activity"><Activity size={17} /> Activity</a>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
