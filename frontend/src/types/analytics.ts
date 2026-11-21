@@ -13,6 +13,19 @@ export interface UsageTrendPoint {
   records: number
 }
 
+export interface UsageOverTimePoint {
+  date: string
+  resourceType: ResourceType
+  usageUnit: string
+  totalUsage: number
+}
+
+export interface SpendingTrendPoint {
+  date: string
+  currency: string
+  totalCost: number
+}
+
 export interface DashboardAnalytics {
   organizationId: string
   period: {
@@ -21,6 +34,8 @@ export interface DashboardAnalytics {
   }
   resourceConsumption: UsageSummary[]
   usageTrend: UsageTrendPoint[]
+  usageOverTime: UsageOverTimePoint[]
+  spendingTrend: SpendingTrendPoint[]
   activeResources: number
   utilizationPercent: number | null
 }

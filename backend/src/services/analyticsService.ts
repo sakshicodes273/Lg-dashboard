@@ -5,6 +5,7 @@ import {
   type ResourceType,
   type UsageRecord,
 } from '../models/UsageRecord.js'
+import { getBillingTransactionModel } from '../models/BillingTransaction.js'
 
 export interface ListUsageRecordsInput {
   organizationId: string
@@ -42,9 +43,24 @@ export interface DashboardUsageTrendPoint {
   records: number
 }
 
+export interface UsageOverTimePoint {
+  date: string
+  resourceType: ResourceType
+  usageUnit: string
+  totalUsage: number
+}
+
+export interface SpendingTrendPoint {
+  date: string
+  currency: string
+  totalCost: number
+}
+
 export interface DashboardAnalytics {
   resourceConsumption: UsageSummary[]
   usageTrend: DashboardUsageTrendPoint[]
+  usageOverTime: UsageOverTimePoint[]
+  spendingTrend: SpendingTrendPoint[]
   activeResources: number
   utilizationPercent: number | null
 }
@@ -138,8 +154,19 @@ export async function getDashboardAnalytics(
   input: UsageSummaryInput,
 ): Promise<DashboardAnalytics> {
   const UsageRecordModel = getUsageRecordModel(connection)
+  const BillingTransactionModel = getBillingTransactionModel(connection)
   const match = createUsageMatch(input)
-  const [resourceConsumption, resourceNames, usageTrend] = await Promise.all([
+  const billingMatch: Record<string, unknown> = {
+    organizationId: input.organizationId,
+    status: 'successful',
+  }
+  if (input.startDate || input.endDate) {
+    billingMatch.createdAt = {
+      ...(input.startDate ? { $gte: input.startDate } : {}),
+      ...(input.endDate ? { $lt: input.endDate } : {}),
+    }
+  }
+  const [resourceConsumption, resourceNames, usageTrend, usageOverTime, spendingTrend] = await Promise.all([
     summarizeUsage(connection, input),
     UsageRecordModel.distinct('resourceName', {
       ...match,
@@ -162,11 +189,69 @@ export async function getDashboardAnalytics(
       { $project: { _id: 0, date: '$_id', records: 1 } },
       { $sort: { date: 1 } },
     ]).exec(),
+    UsageRecordModel.aggregate<UsageOverTimePoint>([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            date: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$recordedAt',
+                timezone: 'UTC',
+              },
+            },
+            resourceType: '$resourceType',
+            usageUnit: '$usageUnit',
+          },
+          totalUsage: { $sum: '$usageAmount' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id.date',
+          resourceType: '$_id.resourceType',
+          usageUnit: '$_id.usageUnit',
+          totalUsage: 1,
+        },
+      },
+      { $sort: { date: 1, resourceType: 1, usageUnit: 1 } },
+    ]).exec(),
+    BillingTransactionModel.aggregate<SpendingTrendPoint>([
+      { $match: billingMatch },
+      {
+        $group: {
+          _id: {
+            date: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'UTC',
+              },
+            },
+            currency: '$currency',
+          },
+          totalCost: { $sum: '$amount' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id.date',
+          currency: '$_id.currency',
+          totalCost: 1,
+        },
+      },
+      { $sort: { date: 1, currency: 1 } },
+    ]).exec(),
   ])
 
   return {
     resourceConsumption,
     usageTrend,
+    usageOverTime,
+    spendingTrend,
     activeResources: resourceNames.length,
     utilizationPercent: null,
   }

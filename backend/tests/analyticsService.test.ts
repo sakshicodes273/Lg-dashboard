@@ -34,6 +34,11 @@ const mocks = vi.hoisted(() => {
 vi.mock('../src/models/UsageRecord.js', () => ({
   getUsageRecordModel: () => mocks.usageModel,
 }))
+vi.mock('../src/models/BillingTransaction.js', () => ({
+  getBillingTransactionModel: () => ({
+    aggregate: vi.fn(() => ({ exec: vi.fn(async () => []) })),
+  }),
+}))
 
 import {
   createUsageRecord,
@@ -146,6 +151,8 @@ describe('analyticsService', () => {
     expect(result).toEqual({
       resourceConsumption: [],
       usageTrend: [],
+      usageOverTime: [],
+      spendingTrend: [],
       activeResources: 0,
       utilizationPercent: null,
     })

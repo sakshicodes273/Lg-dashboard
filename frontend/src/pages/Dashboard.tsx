@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Boxes, CalendarDays, CircleDollarSign, Gauge, HardDrive, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { apiRequest } from '../services/api'
-import type { DashboardAnalytics, UsageSummary, UsageTrendPoint } from '../types/analytics'
+import type { DashboardAnalytics, UsageSummary } from '../types/analytics'
 
 function toInputDate(date: Date): string {
   const year = date.getFullYear()
@@ -56,22 +72,56 @@ function sumSpendByCurrency(summary: UsageSummary[]): Array<{ currency: string; 
   return Array.from(totals, ([currency, amount]) => ({ currency, amount }))
 }
 
-function getTrendForPeriod(data: DashboardAnalytics): UsageTrendPoint[] {
-  const recordsByDate = new Map(data.usageTrend.map((point) => [point.date, point.records]))
+function displayDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${value}T00:00:00.000Z`))
+}
+
+function usageSeriesKey(resourceType: UsageSummary['resourceType'], usageUnit: string): string {
+  return `${resourceType}|${usageUnit}`
+}
+
+function buildUsageChartData(
+  data: DashboardAnalytics,
+  selectedSeries: string,
+): Array<{ date: string; usage: number; records: number }> {
+  const values = new Map<string, number>()
+  const records = new Map(data.usageTrend.map((point) => [point.date, point.records]))
+  for (const point of data.usageOverTime) {
+    if (usageSeriesKey(point.resourceType, point.usageUnit) === selectedSeries) {
+      values.set(point.date, (values.get(point.date) ?? 0) + point.totalUsage)
+    }
+  }
+
+  const points: Array<{ date: string; usage: number; records: number }> = []
   const start = new Date(`${data.period.startDate}T00:00:00.000Z`)
   const end = new Date(`${data.period.endDate}T00:00:00.000Z`)
-  const points: UsageTrendPoint[] = []
-
   for (let day = start; day <= end; day = new Date(day.getTime() + 24 * 60 * 60 * 1000)) {
     const date = day.toISOString().slice(0, 10)
-    points.push({ date, records: recordsByDate.get(date) ?? 0 })
+    points.push({ date, usage: values.get(date) ?? 0, records: records.get(date) ?? 0 })
   }
   return points
 }
 
-function displayDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
-    .format(new Date(`${value}T00:00:00.000Z`))
+function buildSpendingChartData(
+  data: DashboardAnalytics,
+  currency: string,
+): Array<{ date: string; spend: number }> {
+  const values = new Map<string, number>()
+  for (const point of data.spendingTrend) {
+    if (point.currency === currency) {
+      values.set(point.date, (values.get(point.date) ?? 0) + point.totalCost)
+    }
+  }
+
+  const points: Array<{ date: string; spend: number }> = []
+  const start = new Date(`${data.period.startDate}T00:00:00.000Z`)
+  const end = new Date(`${data.period.endDate}T00:00:00.000Z`)
+  for (let day = start; day <= end; day = new Date(day.getTime() + 24 * 60 * 60 * 1000)) {
+    const date = day.toISOString().slice(0, 10)
+    points.push({ date, spend: values.get(date) ?? 0 })
+  }
+  return points
 }
 
 export function Dashboard() {
@@ -82,6 +132,8 @@ export function Dashboard() {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [usageSeries, setUsageSeries] = useState('')
+  const [spendingCurrency, setSpendingCurrency] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -110,8 +162,6 @@ export function Dashboard() {
     () => analytics ? sumSpendByCurrency(analytics.resourceConsumption) : [],
     [analytics],
   )
-  const trend = useMemo(() => analytics ? getTrendForPeriod(analytics) : [], [analytics])
-  const maxDailyRecords = Math.max(...trend.map((point) => point.records), 0)
   const costByCurrency = useMemo(() => {
     const totals = new Map<string, number>()
     for (const item of analytics?.resourceConsumption ?? []) {
@@ -119,6 +169,56 @@ export function Dashboard() {
     }
     return totals
   }, [analytics])
+  const usageSeriesOptions = useMemo(() => {
+    const options = new Map<string, { key: string; label: string }>()
+    for (const point of analytics?.usageOverTime ?? []) {
+      const key = usageSeriesKey(point.resourceType, point.usageUnit)
+      options.set(key, { key, label: `${formatResourceType(point.resourceType)} · ${point.usageUnit}` })
+    }
+    return Array.from(options.values())
+  }, [analytics])
+  const spendingCurrencies = useMemo(
+    () => Array.from(new Set(analytics?.spendingTrend.map((point) => point.currency) ?? [])),
+    [analytics],
+  )
+
+  useEffect(() => {
+    if (usageSeriesOptions.length > 0 && !usageSeriesOptions.some((option) => option.key === usageSeries)) {
+      setUsageSeries(usageSeriesOptions[0].key)
+    }
+  }, [usageSeriesOptions, usageSeries])
+  useEffect(() => {
+    if (spendingCurrencies.length > 0 && !spendingCurrencies.includes(spendingCurrency)) {
+      setSpendingCurrency(spendingCurrencies[0])
+    }
+  }, [spendingCurrencies, spendingCurrency])
+
+  const effectiveUsageSeries = usageSeriesOptions.some((option) => option.key === usageSeries)
+    ? usageSeries
+    : usageSeriesOptions[0]?.key ?? ''
+  const effectiveSpendingCurrency = spendingCurrencies.includes(spendingCurrency)
+    ? spendingCurrency
+    : spendingCurrencies[0] ?? ''
+  const usageChartData = useMemo(
+    () => analytics ? buildUsageChartData(analytics, effectiveUsageSeries) : [],
+    [analytics, effectiveUsageSeries],
+  )
+  const spendingChartData = useMemo(
+    () => analytics ? buildSpendingChartData(analytics, effectiveSpendingCurrency) : [],
+    [analytics, effectiveSpendingCurrency],
+  )
+  const resourceDistribution = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const item of analytics?.resourceConsumption ?? []) {
+      if (item.currency === effectiveSpendingCurrency) {
+        totals.set(item.resourceType, (totals.get(item.resourceType) ?? 0) + item.totalCost)
+      }
+    }
+    return Array.from(totals, ([resourceType, value]) => ({
+      name: formatResourceType(resourceType as UsageSummary['resourceType']),
+      value,
+    }))
+  }, [analytics, effectiveSpendingCurrency])
 
   function refresh() {
     setLoading(true)
@@ -251,36 +351,44 @@ export function Dashboard() {
             <article className="chart-panel usage-panel" aria-busy={loading}>
               <div className="panel-heading">
                 <div><span className="panel-kicker">DAILY ACTIVITY</span><h2>Usage overview</h2></div>
-                <span className="chart-caption">Usage records per day</span>
+                {usageSeriesOptions.length > 0 && (
+                  <select
+                    className="chart-select"
+                    aria-label="Usage chart series"
+                    value={effectiveUsageSeries}
+                    onChange={(event) => setUsageSeries(event.target.value)}
+                  >
+                    {usageSeriesOptions.map((option) => (
+                      <option value={option.key} key={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               {loading ? (
                 <div className="analytics-state" role="status"><span className="loader" /> Loading usage trend…</div>
-              ) : analytics?.usageTrend.length === 0 ? (
+              ) : !analytics || analytics.usageOverTime.length === 0 ? (
                 <div className="analytics-state analytics-empty">No usage records for this date range.</div>
               ) : (
-                <div className="usage-chart" role="img" aria-label="Daily usage records over the selected period">
-                  <div className="chart-y-labels"><span>{maxDailyRecords}</span><span>{Math.ceil(maxDailyRecords / 2)}</span><span>0</span></div>
-                  <div className="chart-plot">
-                    <div className="chart-grid-lines"><i /><i /><i /></div>
-                    <div className="bar-chart" style={{ gridTemplateColumns: `repeat(${trend.length}, minmax(0, 1fr))` }}>
-                      {trend.map((point) => {
-                        const height = maxDailyRecords === 0 ? 0 : (point.records / maxDailyRecords) * 100
-                        const dayOfMonth = Number(point.date.slice(-2))
-                        return (
-                          <div className="bar-column" key={point.date} title={`${displayDate(point.date)}: ${point.records} records`}>
-                            <span style={{ height: `${height}%` }} />
-                            {(dayOfMonth === 1 || dayOfMonth % 7 === 0) && <small>{dayOfMonth}</small>}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
+                <div className="interactive-chart" role="img" aria-label="Daily usage over the selected period">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={usageChartData} margin={{ top: 12, right: 8, bottom: 4, left: -16 }}>
+                      <CartesianGrid stroke="rgba(149, 183, 199, .09)" vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={displayDate} tick={{ fill: '#637c88', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={24} />
+                      <YAxis tick={{ fill: '#637c88', fontSize: 9 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ background: '#102333', border: '1px solid rgba(149, 183, 199, .18)', borderRadius: 5, fontSize: 10 }}
+                        labelFormatter={(label) => displayDate(String(label))}
+                        formatter={(value) => [formatNumber(Number(value)), 'Usage']}
+                      />
+                      <Line type="monotone" dataKey="usage" stroke="#51d7d1" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: '#51d7d1', stroke: '#0c1b29', strokeWidth: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               )}
-              {!loading && analytics && analytics.usageTrend.length > 0 && (
+              {!loading && analytics && analytics.usageOverTime.length > 0 && (
                 <div className="chart-legend">
-                  <span><i className="legend-dot legend-cyan" /> Usage records</span>
-                  <span className="chart-total">{trend.reduce((total, point) => total + point.records, 0)} <small>in period</small></span>
+                  <span><i className="legend-dot legend-cyan" /> Consumption</span>
+                  <span className="chart-total">{usageChartData.reduce((total, point) => total + point.usage, 0) ? formatNumber(usageChartData.reduce((total, point) => total + point.usage, 0)) : '0'} <small>in period</small></span>
                 </div>
               )}
             </article>
@@ -288,30 +396,126 @@ export function Dashboard() {
             <article className="chart-panel resource-panel" id="resources" aria-busy={loading}>
               <div className="panel-heading">
                 <div><span className="panel-kicker">BY RESOURCE TYPE</span><h2>Resource consumption</h2></div>
+                {costByCurrency.size > 0 && <span className="chart-caption">Cost by resource</span>}
               </div>
               {loading ? (
                 <div className="analytics-state" role="status"><span className="loader" /> Loading resource data…</div>
               ) : analytics?.resourceConsumption.length === 0 ? (
                 <div className="analytics-state analytics-empty">No resource consumption recorded for this date range.</div>
               ) : (
-                <div className="resource-list">
-                  {analytics?.resourceConsumption.map((item) => {
-                    const currencyTotal = costByCurrency.get(item.currency) ?? 0
-                    const percentage = currencyTotal === 0 ? 0 : (item.totalCost / currencyTotal) * 100
-                    return (
-                      <div className="resource-row" key={`${item.resourceType}-${item.usageUnit}-${item.currency}`}>
-                        <div className="resource-row-heading">
-                          <span>{formatResourceType(item.resourceType)} <small>· {item.usageUnit}</small></span>
-                          <span>{formatNumber(item.totalUsage)} {item.usageUnit}</span>
-                        </div>
-                        <div className="resource-row-cost">
-                          <span>{formatCurrency(item.totalCost, item.currency)}</span>
-                          <small>{Math.round(percentage)}% of {item.currency} spend</small>
-                        </div>
-                        <b><i style={{ width: `${percentage}%` }} /></b>
-                      </div>
-                    )
-                  })}
+                <div className="interactive-chart resource-bar-chart" role="img" aria-label="Resource consumption cost comparison">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={(analytics?.resourceConsumption ?? []).map((item) => ({
+                        name: `${formatResourceType(item.resourceType)} · ${item.usageUnit}`,
+                        cost: item.totalCost,
+                        currency: item.currency,
+                      }))}
+                      layout="vertical"
+                      margin={{ top: 8, right: 12, bottom: 4, left: 4 }}
+                    >
+                      <CartesianGrid stroke="rgba(149, 183, 199, .09)" horizontal={false} />
+                      <XAxis type="number" tick={{ fill: '#637c88', fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={105} tick={{ fill: '#9ab0b8', fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ background: '#102333', border: '1px solid rgba(149, 183, 199, .18)', borderRadius: 5, fontSize: 10 }}
+                        formatter={(value, _name, props) => [
+                          formatCurrency(Number(value), props.payload.currency),
+                          'Cost',
+                        ]}
+                      />
+                      <Bar dataKey="cost" fill="#62a9ed" radius={[0, 4, 4, 0]} barSize={12} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </article>
+
+            <article className="chart-panel spending-panel" aria-busy={loading}>
+              <div className="panel-heading">
+                <div><span className="panel-kicker">DAILY SPEND</span><h2>Spending trend</h2></div>
+                {spendingCurrencies.length > 0 && (
+                  <select
+                    className="chart-select"
+                    aria-label="Spending chart currency"
+                    value={effectiveSpendingCurrency}
+                    onChange={(event) => setSpendingCurrency(event.target.value)}
+                  >
+                    {spendingCurrencies.map((currency) => <option value={currency} key={currency}>{currency}</option>)}
+                  </select>
+                )}
+              </div>
+              {loading ? (
+                <div className="analytics-state" role="status"><span className="loader" /> Loading spending trend…</div>
+              ) : spendingCurrencies.length === 0 ? (
+                <div className="analytics-state analytics-empty">No successful billing transactions for this date range.</div>
+              ) : (
+                <div className="interactive-chart" role="img" aria-label="Successful billing spending over the selected period">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={spendingChartData} margin={{ top: 12, right: 8, bottom: 4, left: -16 }}>
+                      <defs>
+                        <linearGradient id="spendFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#62a9ed" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#62a9ed" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(149, 183, 199, .09)" vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={displayDate} tick={{ fill: '#637c88', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={24} />
+                      <YAxis tick={{ fill: '#637c88', fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ background: '#102333', border: '1px solid rgba(149, 183, 199, .18)', borderRadius: 5, fontSize: 10 }}
+                        labelFormatter={(label) => displayDate(String(label))}
+                        formatter={(value) => [formatCurrency(Number(value), effectiveSpendingCurrency), 'Spend']}
+                      />
+                      <Area type="monotone" dataKey="spend" stroke="#62a9ed" strokeWidth={2} fill="url(#spendFill)" activeDot={{ r: 4 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </article>
+
+            <article className="chart-panel distribution-panel" aria-busy={loading}>
+              <div className="panel-heading">
+                <div><span className="panel-kicker">COST SHARE</span><h2>Resource distribution</h2></div>
+                {effectiveSpendingCurrency && <span className="chart-caption">{effectiveSpendingCurrency}</span>}
+              </div>
+              {loading ? (
+                <div className="analytics-state" role="status"><span className="loader" /> Loading distribution…</div>
+              ) : resourceDistribution.length === 0 ? (
+                <div className="analytics-state analytics-empty">No resource cost to distribute.</div>
+              ) : (
+                <div className="interactive-chart distribution-chart" role="img" aria-label="Resource cost distribution">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={resourceDistribution}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="52%"
+                        outerRadius="78%"
+                        paddingAngle={3}
+                        stroke="rgba(7, 19, 31, .8)"
+                        strokeWidth={2}
+                      >
+                        {resourceDistribution.map((_entry, index) => (
+                          <Cell key={resourceDistribution[index].name} fill={['#51d7d1', '#62a9ed', '#8bd1a2', '#d9b375'][index % 4]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: '#102333', border: '1px solid rgba(149, 183, 199, .18)', borderRadius: 5, fontSize: 10 }}
+                        formatter={(value) => formatCurrency(Number(value), effectiveSpendingCurrency)}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {!loading && resourceDistribution.length > 0 && (
+                <div className="distribution-legend">
+                  {resourceDistribution.map((item, index) => (
+                    <span key={item.name}><i style={{ background: ['#51d7d1', '#62a9ed', '#8bd1a2', '#d9b375'][index % 4] }} />{item.name}</span>
+                  ))}
                 </div>
               )}
             </article>

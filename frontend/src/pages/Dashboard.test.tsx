@@ -20,6 +20,13 @@ const populatedAnalytics: DashboardAnalytics = {
     { resourceType: 'storage', usageUnit: 'GB', currency: 'USD', totalUsage: 3, totalCost: 7.5 },
   ],
   usageTrend: [{ date: '2026-11-02', records: 2 }],
+  usageOverTime: [
+    { date: '2026-11-02', resourceType: 'compute', usageUnit: 'GB', totalUsage: 2.5 },
+    { date: '2026-11-02', resourceType: 'storage', usageUnit: 'GB', totalUsage: 3 },
+  ],
+  spendingTrend: [
+    { date: '2026-11-02', currency: 'USD', totalCost: 20 },
+  ],
   activeResources: 2,
   utilizationPercent: null,
 }
@@ -42,8 +49,14 @@ describe('Dashboard analytics', () => {
 
     expect(await screen.findByText('5.5 GB')).toBeTruthy()
     expect(screen.getByText('$20.00')).toBeTruthy()
-    expect(screen.getByText(/Compute/)).toBeTruthy()
+    expect(screen.getAllByText(/Compute/).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Named resources with recorded usage').parentElement?.textContent).toContain('2')
+    expect(screen.getByRole('heading', { name: 'Usage overview' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Resource consumption' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Spending trend' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Resource distribution' })).toBeTruthy()
+    expect(screen.getByLabelText('Usage chart series')).toBeTruthy()
+    expect(screen.getByLabelText('Spending chart currency')).toBeTruthy()
     expect(request.mock.calls[0][0]).toMatch(/^\/dashboard\?startDate=\d{4}-\d{2}-\d{2}&endDate=\d{4}-\d{2}-\d{2}$/)
   })
 
@@ -52,6 +65,8 @@ describe('Dashboard analytics', () => {
       ...populatedAnalytics,
       resourceConsumption: [],
       usageTrend: [],
+      usageOverTime: [],
+      spendingTrend: [],
       activeResources: 0,
     })
 
