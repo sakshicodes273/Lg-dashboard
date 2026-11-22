@@ -36,11 +36,11 @@ function getDefaultDateRange(): { startDate: string; endDate: string } {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value)
 }
 
 function formatCurrency(value: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,
@@ -73,7 +73,11 @@ function sumSpendByCurrency(summary: UsageSummary[]): Array<{ currency: string; 
 }
 
 function displayDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  return new Intl.DateTimeFormat('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  })
     .format(new Date(`${value}T00:00:00.000Z`))
 }
 

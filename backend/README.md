@@ -28,4 +28,6 @@ The analytics service creates records, lists them with organization/date/resourc
 
 For local development, start MongoDB with replica-set support, for example `mongod --replSet rs0 --bind_ip localhost --dbpath <data-directory>`, then initialize the set once with `mongosh --eval "rs.initiate()"`. Set `MONGODB_URI` to `mongodb://127.0.0.1:27017/ledgerguard?replicaSet=rs0` (as in `.env.example`). For a hosted database, use its replica-set or sharded-cluster connection string.
 
+To populate the single local organization with synthetic Indian-region usage and INR billing records, run `npm run seed:india-demo` from `backend`. The command refuses production mode, requires exactly one organization unless `SEED_ORGANIZATION_ID` is set, and can be rerun safely. Remove only those demo records with `npm run seed:india-demo -- --clear`.
+
 In non-production mode, the API accepts the configured `FRONTEND_ORIGIN` and `http://127.0.0.1:5173`. When `VITE_API_URL` is unset, the frontend uses its current hostname for API requests so session cookies remain on the same host. For production, configure `FRONTEND_ORIGIN` and `VITE_API_URL` explicitly.

@@ -16,8 +16,8 @@ const populatedAnalytics: DashboardAnalytics = {
   organizationId: 'org-1',
   period: { startDate: '2026-11-01', endDate: '2026-11-30' },
   resourceConsumption: [
-    { resourceType: 'compute', usageUnit: 'GB', currency: 'USD', totalUsage: 2.5, totalCost: 12.5 },
-    { resourceType: 'storage', usageUnit: 'GB', currency: 'USD', totalUsage: 3, totalCost: 7.5 },
+    { resourceType: 'compute', usageUnit: 'GB', currency: 'INR', totalUsage: 2.5, totalCost: 12.5 },
+    { resourceType: 'storage', usageUnit: 'GB', currency: 'INR', totalUsage: 3, totalCost: 7.5 },
   ],
   usageTrend: [{ date: '2026-11-02', records: 2 }],
   usageOverTime: [
@@ -25,7 +25,7 @@ const populatedAnalytics: DashboardAnalytics = {
     { date: '2026-11-02', resourceType: 'storage', usageUnit: 'GB', totalUsage: 3 },
   ],
   spendingTrend: [
-    { date: '2026-11-02', currency: 'USD', totalCost: 20 },
+    { date: '2026-11-02', currency: 'INR', totalCost: 20 },
   ],
   activeResources: 2,
   utilizationPercent: null,
@@ -48,7 +48,7 @@ describe('Dashboard analytics', () => {
     renderDashboard()
 
     expect(await screen.findByText('5.5 GB')).toBeTruthy()
-    expect(screen.getByText('$20.00')).toBeTruthy()
+    expect(screen.getByText(/₹20\.00/)).toBeTruthy()
     expect(screen.getAllByText(/Compute/).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Named resources with recorded usage').parentElement?.textContent).toContain('2')
     expect(screen.getByRole('heading', { name: 'Usage overview' })).toBeTruthy()

@@ -6,14 +6,15 @@ import type { BillingStatus, BillingTransaction, BillingTransactionPage } from '
 const pageSize = 10
 
 function displayDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat('en-IN', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Asia/Kolkata',
   }).format(new Date(value))
 }
 
 function displayAmount(transaction: BillingTransaction): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: transaction.currency,
   }).format(transaction.amount)
