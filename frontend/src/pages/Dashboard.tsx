@@ -18,7 +18,14 @@ import {
   YAxis,
 } from 'recharts'
 import { apiRequest } from '../services/api'
-import type { DashboardAnalytics, UsageSummary } from '../types/analytics'
+import type {
+  BillingInsights,
+  DashboardAnalytics,
+  ResourceDetailsPage,
+  SpendingComparison,
+  UsageComparisonItem,
+  UsageSummary,
+} from '../types/analytics'
 
 function toInputDate(date: Date): string {
   const year = date.getFullYear()
@@ -134,6 +141,14 @@ export function Dashboard() {
   const [endDate, setEndDate] = useState(initialRange.endDate)
   const [refreshKey, setRefreshKey] = useState(0)
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
+  const [resourceDetails, setResourceDetails] = useState<ResourceDetailsPage | null>(null)
+  const [usageComparison, setUsageComparison] = useState<UsageComparisonItem[]>([])
+  const [spendingComparison, setSpendingComparison] = useState<SpendingComparison | null>(null)
+  const [billingInsights, setBillingInsights] = useState<BillingInsights | null>(null)
+  const [resourceType, setResourceType] = useState('')
+  const [resourceSort, setResourceSort] = useState<'usage' | 'cost' | 'recordedAt'>('recordedAt')
+  const [resourceOrder, setResourceOrder] = useState<'asc' | 'desc'>('desc')
+  const [resourcePage, setResourcePage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [usageSeries, setUsageSeries] = useState('')
@@ -142,9 +157,33 @@ export function Dashboard() {
   useEffect(() => {
     const controller = new AbortController()
     const params = new URLSearchParams({ startDate, endDate })
+    const resourceParams = new URLSearchParams({
+      startDate,
+      endDate,
+      sortBy: resourceSort,
+      order: resourceOrder,
+      page: String(resourcePage),
+      limit: '10',
+    })
+    if (resourceType) resourceParams.set('resourceType', resourceType)
+    const comparisonParams = new URLSearchParams({ startDate, endDate })
+    if (resourceType) comparisonParams.set('resourceType', resourceType)
 
-    apiRequest<DashboardAnalytics>(`/dashboard?${params}`, { signal: controller.signal })
-      .then(setAnalytics)
+    Promise.all([
+      apiRequest<DashboardAnalytics>(`/dashboard?${params}`, { signal: controller.signal }),
+      apiRequest<ResourceDetailsPage>(`/analytics/resource-details?${resourceParams}`, { signal: controller.signal }),
+      apiRequest<{ success: true; data: UsageComparisonItem[] }>(`/analytics/usage-comparison?${comparisonParams}`, { signal: controller.signal }),
+      apiRequest<{ success: true; data: SpendingComparison }>(`/analytics/spending-comparison?${comparisonParams}`, { signal: controller.signal }),
+      apiRequest<{ success: true; data: BillingInsights }>(`/analytics/billing-insights?${comparisonParams}`, { signal: controller.signal }),
+    ])
+      .then(([dashboard, resources, usage, spending, insights]) => {
+        setAnalytics(dashboard)
+        setResourceDetails(resources?.data && Array.isArray(resources.data) ? resources : null)
+        setUsageComparison(Array.isArray(usage?.data) ? usage.data : [])
+        setSpendingComparison(spending?.data?.currency ? spending.data : null)
+        setBillingInsights(insights?.data?.statusCounts ? insights.data : null)
+        setError(null)
+      })
       .catch((requestError: unknown) => {
         if (!controller.signal.aborted) {
           setAnalytics(null)
@@ -156,7 +195,7 @@ export function Dashboard() {
       })
 
     return () => controller.abort()
-  }, [startDate, endDate, refreshKey])
+  }, [startDate, endDate, resourceType, resourceSort, resourceOrder, resourcePage, refreshKey])
 
   const usageTotals = useMemo(
     () => analytics ? sumUsageByUnit(analytics.resourceConsumption) : [],
@@ -235,6 +274,7 @@ export function Dashboard() {
     setLoading(true)
     setError(null)
     setStartDate(value)
+    setResourcePage(1)
   }
 
   function updateEndDate(value: string) {
@@ -242,6 +282,26 @@ export function Dashboard() {
     setLoading(true)
     setError(null)
     setEndDate(value)
+    setResourcePage(1)
+  }
+
+  function setPreset(preset: 'today' | '7' | '30' | 'month' | 'last-month') {
+    const today = new Date()
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    let start = new Date(end)
+    if (preset === 'today') start = new Date(end)
+    if (preset === '7') start = new Date(end.getTime() - 6 * 24 * 60 * 60 * 1000)
+    if (preset === '30') start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
+    if (preset === 'month') start = new Date(end.getFullYear(), end.getMonth(), 1)
+    if (preset === 'last-month') {
+      start = new Date(end.getFullYear(), end.getMonth() - 1, 1)
+      end.setTime(new Date(end.getFullYear(), end.getMonth(), 0).getTime())
+    }
+    setLoading(true)
+    setError(null)
+    setStartDate(toInputDate(start))
+    setEndDate(toInputDate(end))
+    setResourcePage(1)
   }
 
   function usageValue(): string {
@@ -307,6 +367,13 @@ export function Dashboard() {
       <section className="analytics-toolbar" aria-label="Analytics date range">
         <div className="analytics-toolbar-title"><CalendarDays size={16} /><span>Date range</span></div>
         <div className="analytics-filters">
+          <div className="date-presets" aria-label="Date presets">
+            <button type="button" onClick={() => setPreset('today')}>Today</button>
+            <button type="button" onClick={() => setPreset('7')}>7 days</button>
+            <button type="button" onClick={() => setPreset('30')}>30 days</button>
+            <button type="button" onClick={() => setPreset('month')}>This month</button>
+            <button type="button" onClick={() => setPreset('last-month')}>Last month</button>
+          </div>
           <label>
             <span>From</span>
             <input
@@ -327,6 +394,25 @@ export function Dashboard() {
               max={initialRange.endDate}
               onChange={(event) => updateEndDate(event.target.value)}
             />
+          </label>
+          <label>
+            <span>Resource</span>
+            <select
+              aria-label="Resource type"
+              value={resourceType}
+              onChange={(event) => {
+                setLoading(true)
+                setError(null)
+                setResourceType(event.target.value)
+                setResourcePage(1)
+              }}
+            >
+              <option value="">All resources</option>
+              <option value="compute">Compute</option>
+              <option value="storage">Storage</option>
+              <option value="api_requests">API requests</option>
+              <option value="network">Network</option>
+            </select>
           </label>
         </div>
       </section>
@@ -524,6 +610,174 @@ export function Dashboard() {
               )}
             </article>
           </section>
+          <section className="comparison-grid" aria-label="Period comparisons" aria-busy={loading}>
+            <article className="chart-panel comparison-panel">
+              <div className="panel-heading">
+                <div><span className="panel-kicker">EQUIVALENT PERIOD</span><h2>Usage comparison</h2></div>
+              </div>
+              {loading ? (
+                <div className="analytics-state">Loading usage comparison…</div>
+              ) : usageComparison.length === 0 ? (
+                <div className="analytics-state analytics-empty">No usage comparison data for this period.</div>
+              ) : (
+                <div className="comparison-list">
+                  {usageComparison.map((item) => (
+                    <div className="comparison-row" key={`${item.resourceType}|${item.usageUnit}|${item.currency}`}>
+                      <div>
+                        <strong>{formatResourceType(item.resourceType)}</strong>
+                        <span>{item.usageUnit}</span>
+                      </div>
+                      <div><span>Current</span><strong>{formatNumber(item.currentUsage)}</strong></div>
+                      <div><span>Previous</span><strong>{formatNumber(item.previousUsage)}</strong></div>
+                      <div className={item.percentageChange !== null && item.percentageChange < 0 ? 'change-negative' : ''}>
+                        <span>Change</span>
+                        <strong>{item.percentageChange === null ? 'No previous data' : `${item.percentageChange >= 0 ? '+' : ''}${formatNumber(item.percentageChange)}%`}</strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+
+            <article className="chart-panel comparison-panel">
+              <div className="panel-heading">
+                <div><span className="panel-kicker">SUCCESSFUL BILLING</span><h2>Spending comparison</h2></div>
+              </div>
+              {loading ? (
+                <div className="analytics-state">Loading spending comparison…</div>
+              ) : !spendingComparison || spendingComparison.currency.length === 0 ? (
+                <div className="analytics-state analytics-empty">No successful billing data for this period.</div>
+              ) : (
+                <div className="spending-comparison-list">
+                  {spendingComparison.currency.map((currency) => {
+                    const current = spendingComparison.current.find((item) => item.currency === currency)?.amount ?? 0
+                    const previous = spendingComparison.previous.find((item) => item.currency === currency)?.amount ?? 0
+                    const difference = spendingComparison.difference.find((item) => item.currency === currency)?.amount ?? 0
+                    const percentage = previous > 0 ? ((current - previous) / previous) * 100 : null
+                    return (
+                      <div className="spending-comparison-row" key={currency}>
+                        <div><span>Current · {currency}</span><strong>{formatCurrency(current, currency)}</strong></div>
+                        <div><span>Previous · {currency}</span><strong>{formatCurrency(previous, currency)}</strong></div>
+                        <div><span>Difference</span><strong>{formatCurrency(difference, currency)}</strong></div>
+                        <div><span>Change</span><strong>{percentage === null ? 'No previous data' : `${percentage >= 0 ? '+' : ''}${formatNumber(percentage)}%`}</strong></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </article>
+          </section>
+
+          <section className="resource-analytics-panel" aria-label="Resource analytics table" aria-busy={loading}>
+            <div className="resource-analytics-heading">
+              <div>
+                <span className="panel-kicker">RESOURCE DETAILS</span>
+                <h2>Resource analytics</h2>
+              </div>
+              <div className="table-sort-controls">
+                <label>
+                  <span>Sort by</span>
+                  <select
+                    value={resourceSort}
+                    onChange={(event) => {
+                      setLoading(true)
+                      setResourceSort(event.target.value as 'usage' | 'cost' | 'recordedAt')
+                      setResourcePage(1)
+                    }}
+                  >
+                    <option value="recordedAt">Recorded date</option>
+                    <option value="usage">Usage</option>
+                    <option value="cost">Cost</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Order</span>
+                  <select
+                    value={resourceOrder}
+                    onChange={(event) => {
+                      setLoading(true)
+                      setResourceOrder(event.target.value as 'asc' | 'desc')
+                      setResourcePage(1)
+                    }}
+                  >
+                    <option value="desc">Descending</option>
+                    <option value="asc">Ascending</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            {loading ? (
+              <div className="ledger-state" role="status"><span className="loader" /> Loading resource analytics…</div>
+            ) : resourceDetails?.data.length === 0 ? (
+              <div className="ledger-state ledger-empty">
+                <strong>No resource analytics found</strong>
+                <span>Try changing the date range or resource filter.</span>
+              </div>
+            ) : (
+              <>
+                <div className="ledger-table-scroll">
+                  <table className="ledger-table resource-analytics-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Resource name</th>
+                        <th scope="col">Resource type</th>
+                        <th scope="col">Usage</th>
+                        <th scope="col">Unit</th>
+                        <th scope="col">Cost</th>
+                        <th scope="col">Recorded date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resourceDetails?.data.map((resource) => (
+                        <tr key={`${resource.resourceName}-${resource.resourceType}-${resource.usageUnit}-${resource.currency}`}>
+                          <td><strong>{resource.resourceName}</strong></td>
+                          <td>{formatResourceType(resource.resourceType)}</td>
+                          <td>{formatNumber(resource.usageAmount)}</td>
+                          <td>{resource.usageUnit}</td>
+                          <td className="ledger-amount">{formatCurrency(resource.cost, resource.currency)}</td>
+                          <td>{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: 'Asia/Kolkata' }).format(new Date(resource.recordedAt))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="ledger-pagination">
+                  <span>Page {resourceDetails?.page ?? 1} of {Math.max(resourceDetails?.totalPages ?? 1, 1)}</span>
+                  <div>
+                    <button type="button" disabled={resourcePage <= 1} onClick={() => { setLoading(true); setResourcePage((page) => page - 1) }}>Previous</button>
+                    <button type="button" disabled={resourcePage >= (resourceDetails?.totalPages ?? 1)} onClick={() => { setLoading(true); setResourcePage((page) => page + 1) }}>Next</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
+
+          {billingInsights && (
+            <section className="billing-insights-grid" aria-label="Billing insights">
+              <article className="chart-panel insight-card">
+                <span className="panel-kicker">SUCCESSFUL SPEND</span>
+                <strong>{billingInsights.successful.length === 0 ? '0' : billingInsights.successful.map((item) => formatCurrency(item.amount, item.currency)).join(' · ')}</strong>
+                <span>{billingInsights.statusCounts.successful} successful transactions</span>
+              </article>
+              <article className="chart-panel insight-card">
+                <span className="panel-kicker">PENDING</span>
+                <strong>{billingInsights.pending.length === 0 ? '0' : billingInsights.pending.map((item) => formatCurrency(item.amount, item.currency)).join(' · ')}</strong>
+                <span>{billingInsights.statusCounts.pending} pending transactions</span>
+              </article>
+              <article className="chart-panel insight-card">
+                <span className="panel-kicker">FAILED</span>
+                <strong>{billingInsights.failed.length === 0 ? '0' : billingInsights.failed.map((item) => formatCurrency(item.amount, item.currency)).join(' · ')}</strong>
+                <span>{billingInsights.statusCounts.failed} failed transactions</span>
+              </article>
+              <article className="chart-panel insight-card">
+                <span className="panel-kicker">HIGHEST-COST RESOURCE</span>
+                <strong>{billingInsights.highestCostResource.resourceName ?? 'No resource cost'}</strong>
+                <span>{billingInsights.highestCostResource.currency
+                  ? `${formatCurrency(billingInsights.highestCostResource.cost, billingInsights.highestCostResource.currency)} · ${billingInsights.highestCostResource.resourceType ? formatResourceType(billingInsights.highestCostResource.resourceType) : ''}`
+                  : 'No cost data'}</span>
+              </article>
+            </section>
+          )}
           <div className="dashboard-footer-note">
             {analytics?.utilizationPercent === null && <span><Gauge size={14} /> Utilization is unavailable until capacity data is configured.</span>}
             <Link to="/billing">View billing ledger</Link>

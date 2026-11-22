@@ -6,6 +6,7 @@ import helmet from 'helmet'
 import authRoutes from './routes/authRoutes.js'
 import billingRoutes from './routes/billingRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
+import analyticsRoutes from './routes/analyticsRoutes.js'
 import { checkRedisHealth } from './services/redisService.js'
 
 const app = express()
@@ -34,6 +35,7 @@ app.get('/api/health/redis', async (_req, res) => {
 app.use('/api/auth', authRoutes)
 app.use('/api/billing', billingRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/analytics', analyticsRoutes)
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Request error:', error)

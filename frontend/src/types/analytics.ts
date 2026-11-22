@@ -39,3 +39,66 @@ export interface DashboardAnalytics {
   activeResources: number
   utilizationPercent: number | null
 }
+
+export interface ResourceDetail {
+  resourceName: string
+  resourceType: ResourceType
+  usageAmount: number
+  usageUnit: string
+  cost: number
+  currency: string
+  recordedAt: string
+}
+
+export interface ResourceDetailsPage {
+  success: true
+  data: ResourceDetail[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+export interface UsageComparisonItem {
+  resourceType: ResourceType
+  usageUnit: string
+  currency: string
+  currentUsage: number
+  previousUsage: number
+  percentageChange: number | null
+}
+
+export interface SpendingAmount {
+  currency: string
+  amount: number
+}
+
+export interface SpendingComparison {
+  current: SpendingAmount[]
+  previous: SpendingAmount[]
+  difference: SpendingAmount[]
+  currency: string[]
+}
+
+export interface BillingInsights {
+  successful: SpendingAmount[]
+  pending: SpendingAmount[]
+  failed: SpendingAmount[]
+  statusCounts: {
+    successful: number
+    pending: number
+    failed: number
+  }
+  highestCostResource: {
+    resourceType: ResourceType | null
+    resourceName: string | null
+    cost: number
+    currency: string | null
+  }
+  spendingTrend: SpendingTrendPoint[]
+  costDistribution: Array<{
+    resourceType: ResourceType
+    currency: string
+    cost: number
+  }>
+}
