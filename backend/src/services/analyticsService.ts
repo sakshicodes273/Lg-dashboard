@@ -36,6 +36,7 @@ export interface UsageSummaryInput {
   organizationId: string
   startDate?: Date
   endDate?: Date
+  resourceType?: ResourceType
 }
 
 export interface DashboardUsageTrendPoint {
@@ -147,6 +148,7 @@ export interface BillingInsights {
 
 function createUsageMatch(input: UsageSummaryInput): Record<string, unknown> {
   const match: Record<string, unknown> = { organizationId: input.organizationId }
+  if (input.resourceType) match.resourceType = input.resourceType
   if (input.startDate || input.endDate) {
     match.recordedAt = {
       ...(input.startDate ? { $gte: input.startDate } : {}),

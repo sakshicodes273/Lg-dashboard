@@ -27,3 +27,21 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
+
+export async function downloadCsv(path: string, filename: string): Promise<void> {
+  const response = await fetch(`${apiBase}${path}`, { credentials: 'include' })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string } | null
+    throw new ApiError(body?.message ?? 'The report could not be downloaded', response.status)
+  }
+
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}

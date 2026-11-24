@@ -185,4 +185,26 @@ describe('analyticsService', () => {
       }),
     ]))
   })
+
+  it('applies the selected resource type to dashboard usage data', async () => {
+    const startDate = new Date('2026-10-01T00:00:00.000Z')
+    const endDate = new Date('2026-11-01T00:00:00.000Z')
+
+    await getDashboardAnalytics(connection, {
+      organizationId: 'org-1',
+      startDate,
+      endDate,
+      resourceType: 'storage',
+    })
+
+    expect(mocks.usageModel.distinct).toHaveBeenCalledWith('resourceName', {
+      organizationId: 'org-1',
+      resourceType: 'storage',
+      recordedAt: { $gte: startDate, $lt: endDate },
+      resourceName: { $type: 'string', $ne: '' },
+    })
+    expect(mocks.usageModel.aggregate).toHaveBeenCalledWith(expect.arrayContaining([
+      { $match: { organizationId: 'org-1', resourceType: 'storage', recordedAt: { $gte: startDate, $lt: endDate } } },
+    ]))
+  })
 })

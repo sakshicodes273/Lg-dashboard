@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/authMiddleware.js'
 import { requireTenant, type TenantRequest } from '../middleware/tenantMiddleware.js'
+import { resourceTypes, type ResourceType } from '../models/UsageRecord.js'
 import { getDashboardAnalytics } from '../services/analyticsService.js'
 
 const dashboardRoutes = Router()
-const allowedQueryParameters = new Set(['startDate', 'endDate'])
+const allowedQueryParameters = new Set(['startDate', 'endDate', 'resourceType'])
 const dayMilliseconds = 24 * 60 * 60 * 1000
 
 class InvalidDashboardRequestError extends Error {}
@@ -20,6 +21,14 @@ function parseDateParameter(value: unknown, parameterName: string): Date | undef
     throw new InvalidDashboardRequestError(`${parameterName} must be a valid calendar date`)
   }
   return date
+}
+
+function parseResourceType(value: unknown): ResourceType | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !resourceTypes.some((resourceType) => resourceType === value)) {
+    throw new InvalidDashboardRequestError(`resourceType must be one of: ${resourceTypes.join(', ')}`)
+  }
+  return value as ResourceType
 }
 
 dashboardRoutes.use(requireAuth, requireTenant)
@@ -48,6 +57,7 @@ dashboardRoutes.get('/', async (req: TenantRequest, res) => {
       organizationId: req.auth.organizationId,
       startDate,
       endDate: new Date(endDate.getTime() + dayMilliseconds),
+      resourceType: parseResourceType(req.query.resourceType),
     })
     res.json({
       organizationId: req.auth.organizationId,

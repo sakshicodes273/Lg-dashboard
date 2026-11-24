@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, CalendarDays, CircleDollarSign, Gauge, HardDrive, RefreshCw } from 'lucide-react'
+import { Boxes, CalendarDays, CircleDollarSign, Download, Gauge, HardDrive, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   Area,
@@ -17,7 +17,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { apiRequest } from '../services/api'
+import { apiRequest, downloadCsv } from '../services/api'
 import type {
   BillingInsights,
   DashboardAnalytics,
@@ -145,44 +145,67 @@ export function Dashboard() {
   const [usageComparison, setUsageComparison] = useState<UsageComparisonItem[]>([])
   const [spendingComparison, setSpendingComparison] = useState<SpendingComparison | null>(null)
   const [billingInsights, setBillingInsights] = useState<BillingInsights | null>(null)
+  const [apiErrors, setApiErrors] = useState({
+    resources: null as string | null,
+    usageComparison: null as string | null,
+    spendingComparison: null as string | null,
+    billingInsights: null as string | null,
+  })
   const [resourceType, setResourceType] = useState('')
   const [resourceSort, setResourceSort] = useState<'usage' | 'cost' | 'recordedAt'>('recordedAt')
   const [resourceOrder, setResourceOrder] = useState<'asc' | 'desc'>('desc')
   const [resourcePage, setResourcePage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [resourceLoading, setResourceLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const [usageSeries, setUsageSeries] = useState('')
   const [spendingCurrency, setSpendingCurrency] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
     const params = new URLSearchParams({ startDate, endDate })
-    const resourceParams = new URLSearchParams({
-      startDate,
-      endDate,
-      sortBy: resourceSort,
-      order: resourceOrder,
-      page: String(resourcePage),
-      limit: '10',
-    })
-    if (resourceType) resourceParams.set('resourceType', resourceType)
+    if (resourceType) params.set('resourceType', resourceType)
     const comparisonParams = new URLSearchParams({ startDate, endDate })
     if (resourceType) comparisonParams.set('resourceType', resourceType)
+    const spendingParams = new URLSearchParams({ startDate, endDate })
 
-    Promise.all([
+    Promise.allSettled([
       apiRequest<DashboardAnalytics>(`/dashboard?${params}`, { signal: controller.signal }),
-      apiRequest<ResourceDetailsPage>(`/analytics/resource-details?${resourceParams}`, { signal: controller.signal }),
       apiRequest<{ success: true; data: UsageComparisonItem[] }>(`/analytics/usage-comparison?${comparisonParams}`, { signal: controller.signal }),
-      apiRequest<{ success: true; data: SpendingComparison }>(`/analytics/spending-comparison?${comparisonParams}`, { signal: controller.signal }),
+      apiRequest<{ success: true; data: SpendingComparison }>(`/analytics/spending-comparison?${spendingParams}`, { signal: controller.signal }),
       apiRequest<{ success: true; data: BillingInsights }>(`/analytics/billing-insights?${comparisonParams}`, { signal: controller.signal }),
     ])
-      .then(([dashboard, resources, usage, spending, insights]) => {
-        setAnalytics(dashboard)
-        setResourceDetails(resources?.data && Array.isArray(resources.data) ? resources : null)
-        setUsageComparison(Array.isArray(usage?.data) ? usage.data : [])
-        setSpendingComparison(spending?.data?.currency ? spending.data : null)
-        setBillingInsights(insights?.data?.statusCounts ? insights.data : null)
+      .then(([dashboard, usage, spending, insights]) => {
+        if (controller.signal.aborted) return
+        if (dashboard.status === 'rejected') {
+          setAnalytics(null)
+          setError(dashboard.reason instanceof Error ? dashboard.reason.message : 'Unable to load analytics')
+          return
+        }
+
+        setAnalytics(dashboard.value)
         setError(null)
+        const usageError = usage.status === 'rejected'
+          ? usage.reason instanceof Error ? usage.reason.message : 'Unable to load usage comparison'
+          : Array.isArray(usage.value.data) ? null : 'The usage comparison response was invalid'
+        const spendingError = spending.status === 'rejected'
+          ? spending.reason instanceof Error ? spending.reason.message : 'Unable to load spending comparison'
+          : Array.isArray(spending.value.data?.currency) ? null : 'The spending comparison response was invalid'
+        const insightsError = insights.status === 'rejected'
+          ? insights.reason instanceof Error ? insights.reason.message : 'Unable to load billing insights'
+          : insights.value.data?.statusCounts ? null : 'The billing insights response was invalid'
+
+        setApiErrors((current) => ({
+          ...current,
+          usageComparison: usageError,
+          spendingComparison: spendingError,
+          billingInsights: insightsError,
+        }))
+        setUsageComparison(usage.status === 'fulfilled' && !usageError ? usage.value.data : [])
+        setSpendingComparison(spending.status === 'fulfilled' && !spendingError ? spending.value.data : null)
+        setBillingInsights(insights.status === 'fulfilled' && !insightsError ? insights.value.data : null)
       })
       .catch((requestError: unknown) => {
         if (!controller.signal.aborted) {
@@ -192,6 +215,45 @@ export function Dashboard() {
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [startDate, endDate, resourceType, refreshKey])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const params = new URLSearchParams({
+      startDate,
+      endDate,
+      sortBy: resourceSort,
+      order: resourceOrder,
+      page: String(resourcePage),
+      limit: '10',
+    })
+    if (resourceType) params.set('resourceType', resourceType)
+
+    apiRequest<ResourceDetailsPage>(`/analytics/resource-details?${params}`, { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return
+        if (!Array.isArray(result.data)) {
+          setResourceDetails(null)
+          setApiErrors((current) => ({ ...current, resources: 'The resource analytics response was invalid' }))
+          return
+        }
+        setResourceDetails(result)
+        setApiErrors((current) => ({ ...current, resources: null }))
+      })
+      .catch((requestError: unknown) => {
+        if (!controller.signal.aborted) {
+          setResourceDetails(null)
+          setApiErrors((current) => ({
+            ...current,
+            resources: requestError instanceof Error ? requestError.message : 'Unable to load resource analytics',
+          }))
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setResourceLoading(false)
       })
 
     return () => controller.abort()
@@ -265,13 +327,38 @@ export function Dashboard() {
 
   function refresh() {
     setLoading(true)
+    setResourceLoading(true)
     setError(null)
     setRefreshKey((current) => current + 1)
+  }
+
+  async function exportResourceAnalytics() {
+    const params = new URLSearchParams({
+      startDate,
+      endDate,
+      sortBy: resourceSort,
+      order: resourceOrder,
+      format: 'csv',
+    })
+    if (resourceType) params.set('resourceType', resourceType)
+    setExportError(null)
+    setExporting(true)
+    try {
+      await downloadCsv(
+        `/analytics/resource-details?${params}`,
+        `ledgerguard-resource-analytics-${startDate}-${endDate}.csv`,
+      )
+    } catch (requestError) {
+      setExportError(requestError instanceof Error ? requestError.message : 'Unable to download the CSV report')
+    } finally {
+      setExporting(false)
+    }
   }
 
   function updateStartDate(value: string) {
     if (!value) return
     setLoading(true)
+    setResourceLoading(true)
     setError(null)
     setStartDate(value)
     setResourcePage(1)
@@ -280,6 +367,7 @@ export function Dashboard() {
   function updateEndDate(value: string) {
     if (!value) return
     setLoading(true)
+    setResourceLoading(true)
     setError(null)
     setEndDate(value)
     setResourcePage(1)
@@ -298,6 +386,7 @@ export function Dashboard() {
       end.setTime(new Date(end.getFullYear(), end.getMonth(), 0).getTime())
     }
     setLoading(true)
+    setResourceLoading(true)
     setError(null)
     setStartDate(toInputDate(start))
     setEndDate(toInputDate(end))
@@ -360,9 +449,20 @@ export function Dashboard() {
           <button className="quiet-button" type="button" onClick={refresh} disabled={loading} title="Refresh analytics">
             <RefreshCw size={15} /> Refresh
           </button>
+          <button className="export-button" type="button" onClick={() => void exportResourceAnalytics()} disabled={exporting || loading || resourceLoading} title="Export filtered resource analytics as CSV">
+            <Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
           <Link className="export-button dashboard-billing-link" to="/billing">Billing ledger</Link>
         </div>
       </div>
+
+      {exportError && (
+        <div className="analytics-error" role="alert">
+          <strong>Couldn&apos;t export the report</strong>
+          <span>{exportError}</span>
+          <button type="button" onClick={() => void exportResourceAnalytics()}>Try again</button>
+        </div>
+      )}
 
       <section className="analytics-toolbar" aria-label="Analytics date range">
         <div className="analytics-toolbar-title"><CalendarDays size={16} /><span>Date range</span></div>
@@ -402,6 +502,7 @@ export function Dashboard() {
               value={resourceType}
               onChange={(event) => {
                 setLoading(true)
+                setResourceLoading(true)
                 setError(null)
                 setResourceType(event.target.value)
                 setResourcePage(1)
@@ -617,6 +718,8 @@ export function Dashboard() {
               </div>
               {loading ? (
                 <div className="analytics-state">Loading usage comparison…</div>
+              ) : apiErrors.usageComparison ? (
+                <div className="analytics-state analytics-error" role="alert">{apiErrors.usageComparison}</div>
               ) : usageComparison.length === 0 ? (
                 <div className="analytics-state analytics-empty">No usage comparison data for this period.</div>
               ) : (
@@ -645,6 +748,8 @@ export function Dashboard() {
               </div>
               {loading ? (
                 <div className="analytics-state">Loading spending comparison…</div>
+              ) : apiErrors.spendingComparison ? (
+                <div className="analytics-state analytics-error" role="alert">{apiErrors.spendingComparison}</div>
               ) : !spendingComparison || spendingComparison.currency.length === 0 ? (
                 <div className="analytics-state analytics-empty">No successful billing data for this period.</div>
               ) : (
@@ -668,7 +773,7 @@ export function Dashboard() {
             </article>
           </section>
 
-          <section className="resource-analytics-panel" aria-label="Resource analytics table" aria-busy={loading}>
+          <section className="resource-analytics-panel" aria-label="Resource analytics table" aria-busy={resourceLoading}>
             <div className="resource-analytics-heading">
               <div>
                 <span className="panel-kicker">RESOURCE DETAILS</span>
@@ -680,7 +785,7 @@ export function Dashboard() {
                   <select
                     value={resourceSort}
                     onChange={(event) => {
-                      setLoading(true)
+                      setResourceLoading(true)
                       setResourceSort(event.target.value as 'usage' | 'cost' | 'recordedAt')
                       setResourcePage(1)
                     }}
@@ -695,7 +800,7 @@ export function Dashboard() {
                   <select
                     value={resourceOrder}
                     onChange={(event) => {
-                      setLoading(true)
+                      setResourceLoading(true)
                       setResourceOrder(event.target.value as 'asc' | 'desc')
                       setResourcePage(1)
                     }}
@@ -706,8 +811,10 @@ export function Dashboard() {
                 </label>
               </div>
             </div>
-            {loading ? (
+            {resourceLoading ? (
               <div className="ledger-state" role="status"><span className="loader" /> Loading resource analytics…</div>
+            ) : apiErrors.resources ? (
+              <div className="ledger-state ledger-error" role="alert">{apiErrors.resources}</div>
             ) : resourceDetails?.data.length === 0 ? (
               <div className="ledger-state ledger-empty">
                 <strong>No resource analytics found</strong>
@@ -744,16 +851,23 @@ export function Dashboard() {
                 <div className="ledger-pagination">
                   <span>Page {resourceDetails?.page ?? 1} of {Math.max(resourceDetails?.totalPages ?? 1, 1)}</span>
                   <div>
-                    <button type="button" disabled={resourcePage <= 1} onClick={() => { setLoading(true); setResourcePage((page) => page - 1) }}>Previous</button>
-                    <button type="button" disabled={resourcePage >= (resourceDetails?.totalPages ?? 1)} onClick={() => { setLoading(true); setResourcePage((page) => page + 1) }}>Next</button>
+                    <button type="button" disabled={resourceLoading || resourcePage <= 1} onClick={() => { setResourceLoading(true); setResourcePage((page) => page - 1) }}>Previous</button>
+                    <button type="button" disabled={resourceLoading || resourcePage >= (resourceDetails?.totalPages ?? 1)} onClick={() => { setResourceLoading(true); setResourcePage((page) => page + 1) }}>Next</button>
                   </div>
                 </div>
               </>
             )}
           </section>
 
-          {billingInsights && (
+          {(billingInsights || apiErrors.billingInsights) && (
             <section className="billing-insights-grid" aria-label="Billing insights">
+              {apiErrors.billingInsights ? (
+                <article className="chart-panel insight-card" role="alert">
+                  <span className="panel-kicker">BILLING INSIGHTS UNAVAILABLE</span>
+                  <strong>{apiErrors.billingInsights}</strong>
+                </article>
+              ) : null}
+              {billingInsights && <>
               <article className="chart-panel insight-card">
                 <span className="panel-kicker">SUCCESSFUL SPEND</span>
                 <strong>{billingInsights.successful.length === 0 ? '0' : billingInsights.successful.map((item) => formatCurrency(item.amount, item.currency)).join(' · ')}</strong>
@@ -776,6 +890,7 @@ export function Dashboard() {
                   ? `${formatCurrency(billingInsights.highestCostResource.cost, billingInsights.highestCostResource.currency)} · ${billingInsights.highestCostResource.resourceType ? formatResourceType(billingInsights.highestCostResource.resourceType) : ''}`
                   : 'No cost data'}</span>
               </article>
+              </>}
             </section>
           )}
           <div className="dashboard-footer-note">

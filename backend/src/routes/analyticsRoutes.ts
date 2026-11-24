@@ -11,8 +11,9 @@ import {
 
 const analyticsRoutes = Router()
 const dayMilliseconds = 24 * 60 * 60 * 1000
-const allowedResourceParameters = new Set(['startDate', 'endDate', 'resourceType', 'sortBy', 'order', 'page', 'limit'])
+const allowedResourceParameters = new Set(['startDate', 'endDate', 'resourceType', 'sortBy', 'order', 'page', 'limit', 'format'])
 const allowedComparisonParameters = new Set(['startDate', 'endDate', 'resourceType'])
+const maximumCsvRows = 10_000
 
 class InvalidAnalyticsRequestError extends Error {}
 
@@ -46,6 +47,28 @@ function parsePositiveInteger(value: unknown, name: string, defaultValue: number
     throw new InvalidAnalyticsRequestError(`${name} must not exceed ${maximum}`)
   }
   return parsed
+}
+
+function csvField(value: string | number | Date): string {
+  let text = value instanceof Date ? value.toISOString() : String(value)
+  if (/^[\u0000-\u0020]*[=+\-@]/.test(text)) text = `'${text}`
+  return `"${text.replaceAll('"', '""')}"`
+}
+
+function resourceDetailsCsv(data: Awaited<ReturnType<typeof getResourceDetails>>['data']): string {
+  const rows = [
+    ['Resource name', 'Resource type', 'Usage amount', 'Usage unit', 'Cost', 'Currency', 'Recorded at'],
+    ...data.map((resource) => [
+      resource.resourceName,
+      resource.resourceType,
+      resource.usageAmount,
+      resource.usageUnit,
+      resource.cost,
+      resource.currency,
+      resource.recordedAt,
+    ]),
+  ]
+  return `${rows.map((row) => row.map(csvField).join(',')).join('\r\n')}\r\n`
 }
 
 function parsePeriod(req: TenantRequest): { startDate: Date; endDate: Date; resourceType?: ResourceType } {
@@ -93,6 +116,14 @@ analyticsRoutes.get('/resource-details', async (req: TenantRequest, res) => {
     if (typeof order !== 'string' || !['asc', 'desc'].includes(order)) {
       throw new InvalidAnalyticsRequestError('order must be asc or desc')
     }
+    const format = req.query.format
+    if (format !== undefined && format !== 'csv') {
+      throw new InvalidAnalyticsRequestError('format must be csv when provided')
+    }
+    if (format === 'csv' && (req.query.page !== undefined || req.query.limit !== undefined)) {
+      throw new InvalidAnalyticsRequestError('page and limit cannot be used when exporting CSV')
+    }
+
     const result = await getResourceDetails(req.tenantConnection, {
       organizationId: req.auth.organizationId,
       ...(resourceType ? { resourceType } : {}),
@@ -100,9 +131,21 @@ analyticsRoutes.get('/resource-details', async (req: TenantRequest, res) => {
       ...(inclusiveEndDate ? { endDate: new Date(inclusiveEndDate.getTime() + dayMilliseconds) } : {}),
       sortBy: sortBy as 'usage' | 'cost' | 'recordedAt',
       order: order as 'asc' | 'desc',
-      page: parsePositiveInteger(req.query.page, 'page', 1, 1_000_000),
-      limit: parsePositiveInteger(req.query.limit, 'limit', 10, 100),
+      page: format === 'csv' ? 1 : parsePositiveInteger(req.query.page, 'page', 1, 1_000_000),
+      limit: format === 'csv' ? maximumCsvRows : parsePositiveInteger(req.query.limit, 'limit', 10, 100),
     })
+    if (format === 'csv') {
+      if (result.total > maximumCsvRows) {
+        res.status(413).json({ message: `CSV export is limited to ${maximumCsvRows.toLocaleString('en-US')} resource rows; narrow the date range or resource filter` })
+        return
+      }
+      const start = typeof req.query.startDate === 'string' ? req.query.startDate : 'all'
+      const end = typeof req.query.endDate === 'string' ? req.query.endDate : 'all'
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="ledgerguard-resource-analytics-${start}-${end}.csv"`)
+      res.send(resourceDetailsCsv(result.data))
+      return
+    }
     res.json({ success: true, ...result })
   } catch (error) {
     if (error instanceof InvalidAnalyticsRequestError) {
@@ -166,6 +209,7 @@ analyticsRoutes.get('/billing-insights', async (req: TenantRequest, res) => {
       organizationId: req.auth.organizationId,
       startDate: period.startDate,
       endDate: period.endDate,
+      ...(period.resourceType ? { resourceType: period.resourceType } : {}),
     })
     res.json({ success: true, data })
   } catch (error) {
