@@ -47,7 +47,11 @@ describe('analytics resource details route', () => {
 
   beforeEach(async () => {
     vi.stubEnv('JWT_SECRET', secret)
-    token = jwt.sign({ userId: 'user-1', organizationId, role: 'owner' }, secret)
+    token = jwt.sign(
+      { userId: 'user-1', organizationId, role: 'owner' },
+      secret,
+      { expiresIn: '7d' },
+    )
     mocks.getResourceDetails.mockReset().mockResolvedValue(resourcePage)
     mocks.getDashboardAnalytics.mockReset().mockResolvedValue({
       resourceConsumption: [],
@@ -146,6 +150,13 @@ describe('analytics resource details route', () => {
       { headers: { Cookie: `ledgerguard_session=${token}` } },
     )
     expect(invalidResponse.status).toBe(400)
+    expect(mocks.getDashboardAnalytics).toHaveBeenCalledTimes(1)
+
+    const spoofedOrganization = await fetch(
+      `${baseUrl}/api/dashboard?organizationId=00000000-0000-4000-8000-000000000002`,
+      { headers: { Cookie: `ledgerguard_session=${token}` } },
+    )
+    expect(spoofedOrganization.status).toBe(400)
     expect(mocks.getDashboardAnalytics).toHaveBeenCalledTimes(1)
   })
 })

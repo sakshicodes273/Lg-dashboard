@@ -2,13 +2,10 @@ import 'dotenv/config'
 import app from './app.js'
 import { closeDatabase, connectDatabase } from './config/database.js'
 import { closeRedis, connectRedis } from './config/redis.js'
+import { getJwtSecret } from './config/security.js'
 
 const port = Number(process.env.PORT ?? 4000)
-const jwtSecret = process.env.JWT_SECRET
-
-if (!jwtSecret || jwtSecret.length < 32) {
-  throw new Error('JWT_SECRET must be set to a secret of at least 32 characters')
-}
+getJwtSecret()
 
 try {
   await connectDatabase()

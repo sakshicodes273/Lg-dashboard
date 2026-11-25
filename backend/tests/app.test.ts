@@ -52,4 +52,18 @@ describe('CORS origins', () => {
 
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
   })
+
+  it('rejects malformed JSON request bodies with a client error', async () => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Connection: 'close',
+      },
+      body: '{',
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ message: 'Invalid JSON request body' })
+  })
 })

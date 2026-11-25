@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Request, Response } from 'express'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
+import { getJwtSecret } from '../config/security.js'
 import { Organization } from '../models/Organization.js'
 import { User } from '../models/User.js'
 import type { AuthenticatedRequest } from '../middleware/authMiddleware.js'
@@ -29,17 +30,33 @@ function publicUser(user: { _id: unknown; name: string; email: string; organizat
   }
 }
 
+function requestBody(req: Request): Record<string, unknown> | null {
+  const body: unknown = req.body
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
+  return body as Record<string, unknown>
+}
+
+function isValidEmail(email: string): boolean {
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
 export async function register(req: Request, res: Response): Promise<void> {
-  const name = typeof req.body.name === 'string' ? req.body.name.trim() : ''
-  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : ''
-  const password = typeof req.body.password === 'string' ? req.body.password : ''
-  const organizationName = typeof req.body.organizationName === 'string' ? req.body.organizationName.trim() : ''
+  const body = requestBody(req)
+  if (!body) {
+    res.status(400).json({ message: 'A JSON registration object is required' })
+    return
+  }
+
+  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const organizationName = typeof body.organizationName === 'string' ? body.organizationName.trim() : ''
 
   if (name.length < 2 || name.length > 120) {
     res.status(400).json({ message: 'Name must be between 2 and 120 characters' })
     return
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+  if (!isValidEmail(email)) {
     res.status(400).json({ message: 'Enter a valid email address' })
     return
   }
@@ -52,6 +69,7 @@ export async function register(req: Request, res: Response): Promise<void> {
     return
   }
 
+  const secret = getJwtSecret()
   const existingUser = await User.exists({ email })
   if (existingUser) {
     res.status(409).json({ message: 'An account with this email already exists' })
@@ -70,12 +88,10 @@ export async function register(req: Request, res: Response): Promise<void> {
       role: 'owner',
     })
 
-    const secret = process.env.JWT_SECRET
-    if (!secret) throw new Error('JWT_SECRET is required')
     const token = jwt.sign(
       { userId: String(user._id), organizationId, role: user.role },
       secret,
-      { expiresIn: '7d' },
+      { algorithm: 'HS256', expiresIn: '7d' },
     )
     setSessionCookie(res, token)
     res.status(201).json({ user: publicUser(user) })
@@ -86,25 +102,38 @@ export async function register(req: Request, res: Response): Promise<void> {
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
-  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : ''
-  const password = typeof req.body.password === 'string' ? req.body.password : ''
+  const body = requestBody(req)
+  if (!body) {
+    res.status(400).json({ message: 'A JSON login object is required' })
+    return
+  }
+
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+  const password = typeof body.password === 'string' ? body.password : ''
   if (!email || !password) {
     res.status(400).json({ message: 'Email and password are required' })
     return
   }
+  if (!isValidEmail(email)) {
+    res.status(400).json({ message: 'Enter a valid email address' })
+    return
+  }
+  if (password.length > 128) {
+    res.status(400).json({ message: 'Password must be 128 characters or fewer' })
+    return
+  }
 
+  const secret = getJwtSecret()
   const user = await User.findOne({ email }).select('+password')
   if (!user || !(await bcrypt.compare(password, user.password))) {
     res.status(401).json({ message: 'Email or password is incorrect' })
     return
   }
 
-  const secret = process.env.JWT_SECRET
-  if (!secret) throw new Error('JWT_SECRET is required')
   const token = jwt.sign(
     { userId: String(user._id), organizationId: user.organizationId, role: user.role },
     secret,
-    { expiresIn: '7d' },
+    { algorithm: 'HS256', expiresIn: '7d' },
   )
   setSessionCookie(res, token)
   res.json({ user: publicUser(user) })

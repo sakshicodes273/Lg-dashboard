@@ -38,6 +38,17 @@ app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/analytics', analyticsRoutes)
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (
+    error instanceof SyntaxError
+    && typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && error.status === 400
+    && 'body' in error
+  ) {
+    res.status(400).json({ message: 'Invalid JSON request body' })
+    return
+  }
   console.error('Request error:', error)
   res.status(500).json({ message: 'An unexpected error occurred' })
 })

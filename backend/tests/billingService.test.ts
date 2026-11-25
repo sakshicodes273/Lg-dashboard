@@ -127,6 +127,7 @@ import app from '../src/app.js'
 import { createBillingTransaction } from '../src/services/billingService.js'
 
 const connection = mocks.connection as unknown as Parameters<typeof createBillingTransaction>[0]
+const routeOrganizationId = '00000000-0000-4000-8000-000000000003'
 
 function request(organizationId = 'org-1') {
   return {
@@ -245,12 +246,34 @@ describe('createBillingTransaction', () => {
     }
   })
 
+  it('requires authentication before reading billing transactions', async () => {
+    const server = app.listen(0)
+
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve))
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port')
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/billing/transactions`,
+        { headers: { Connection: 'close' } },
+      )
+
+      expect(response.status).toBe(401)
+      expect(mocks.billingModel.find).not.toHaveBeenCalled()
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve())
+      })
+    }
+  })
+
   it('returns the created transaction through the authenticated billing route', async () => {
     const secret = 'billing-test-secret-with-at-least-32-characters'
     vi.stubEnv('JWT_SECRET', secret)
     const token = jwt.sign(
-      { userId: 'user-1', organizationId: 'org-1', role: 'owner' },
+      { userId: 'user-1', organizationId: routeOrganizationId, role: 'owner' },
       secret,
+      { expiresIn: '7d' },
     )
     const server = app.listen(0)
 
@@ -279,7 +302,7 @@ describe('createBillingTransaction', () => {
       expect(response.status).toBe(201)
       expect(payload.transaction.status).toBe('pending')
       expect(payload.replayed).toBe(false)
-      expect(payload.transaction.organizationId).toBe('org-1')
+      expect(payload.transaction.organizationId).toBe(routeOrganizationId)
       expect(replayResponse.status).toBe(200)
       expect(replay.replayed).toBe(true)
       expect(replay.transaction.transactionId).toBe(payload.transaction.transactionId)
@@ -295,8 +318,9 @@ describe('createBillingTransaction', () => {
     const secret = 'billing-test-secret-with-at-least-32-characters'
     vi.stubEnv('JWT_SECRET', secret)
     const token = jwt.sign(
-      { userId: 'user-1', organizationId: 'org-1', role: 'owner' },
+      { userId: 'user-1', organizationId: routeOrganizationId, role: 'owner' },
       secret,
+      { expiresIn: '7d' },
     )
     const server = app.listen(0)
 
@@ -312,7 +336,7 @@ describe('createBillingTransaction', () => {
       const response = await request('?status=successful&startDate=2026-10-01&endDate=2026-10-31&page=2&limit=10')
       expect(response.status).toBe(200)
       expect(mocks.billingModel.find).toHaveBeenCalledWith({
-        organizationId: 'org-1',
+        organizationId: routeOrganizationId,
         status: 'successful',
         createdAt: {
           $gte: new Date('2026-10-01T00:00:00.000Z'),
@@ -335,11 +359,16 @@ describe('createBillingTransaction', () => {
     const secret = 'billing-test-secret-with-at-least-32-characters'
     vi.stubEnv('JWT_SECRET', secret)
     const token = jwt.sign(
-      { userId: 'user-1', organizationId: 'org-1', role: 'owner' },
+      { userId: 'user-1', organizationId: routeOrganizationId, role: 'owner' },
       secret,
+      { expiresIn: '7d' },
     )
     const server = app.listen(0)
     const transactionId = 'c4b8e4d7-1163-4f05-a448-520613bd934a'
+    mocks.transactions.set('another-org:foreign-transaction', {
+      transactionId,
+      organizationId: 'another-org',
+    })
 
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve))
@@ -352,7 +381,7 @@ describe('createBillingTransaction', () => {
 
       expect(response.status).toBe(404)
       expect(mocks.billingModel.findOne).toHaveBeenCalledWith({
-        organizationId: 'org-1',
+        organizationId: routeOrganizationId,
         transactionId,
       })
     } finally {
