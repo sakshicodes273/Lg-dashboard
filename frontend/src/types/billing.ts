@@ -16,4 +16,6 @@ export interface BillingTransactionPage {
   limit: number
   total: number
   totalPages: number
+  hasNextPage: boolean
+  hasPreviousPage: boolean
 }

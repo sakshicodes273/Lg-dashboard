@@ -22,6 +22,8 @@ export interface UsageRecordPage {
   limit: number
   total: number
   totalPages: number
+  hasNextPage: boolean
+  hasPreviousPage: boolean
 }
 
 export interface UsageSummary {
@@ -93,6 +95,8 @@ export interface ResourceDetailsPage {
   limit: number
   total: number
   totalPages: number
+  hasNextPage: boolean
+  hasPreviousPage: boolean
 }
 
 export interface PeriodUsageInput {
@@ -197,6 +201,8 @@ export async function listUsageRecords(
     limit: input.limit,
     total,
     totalPages: Math.ceil(total / input.limit),
+    hasNextPage: input.page < Math.ceil(total / input.limit),
+    hasPreviousPage: input.page > 1,
   }
 }
 
@@ -415,6 +421,8 @@ export async function getResourceDetails(
     limit: input.limit,
     total,
     totalPages: Math.ceil(total / input.limit),
+    hasNextPage: input.page < Math.ceil(total / input.limit),
+    hasPreviousPage: input.page > 1,
   }
 }
 
@@ -425,28 +433,45 @@ export async function getUsageComparison(
   const usageModel = getUsageRecordModel(connection)
   const duration = input.endDate.getTime() - input.startDate.getTime()
   const previousStart = new Date(input.startDate.getTime() - duration)
-  const previousEnd = input.startDate
   const baseMatch: Record<string, unknown> = {
     organizationId: input.organizationId,
     ...(input.resourceType ? { resourceType: input.resourceType } : {}),
   }
 
-  const aggregatePeriod = (startDate: Date, endDate: Date) => usageModel.aggregate<{
+  const rows = await usageModel.aggregate<{
     resourceType: ResourceType
     usageUnit: string
     currency: string
-    totalUsage: number
+    currentUsage: number
+    previousUsage: number
   }>([
     {
       $match: {
         ...baseMatch,
-        recordedAt: { $gte: startDate, $lt: endDate },
+        recordedAt: { $gte: previousStart, $lt: input.endDate },
       },
     },
     {
       $group: {
         _id: { resourceType: '$resourceType', usageUnit: '$usageUnit', currency: '$currency' },
-        totalUsage: { $sum: '$usageAmount' },
+        currentUsage: {
+          $sum: {
+            $cond: [
+              { $gte: ['$recordedAt', input.startDate] },
+              '$usageAmount',
+              0,
+            ],
+          },
+        },
+        previousUsage: {
+          $sum: {
+            $cond: [
+              { $lt: ['$recordedAt', input.startDate] },
+              '$usageAmount',
+              0,
+            ],
+          },
+        },
       },
     },
     {
@@ -455,50 +480,21 @@ export async function getUsageComparison(
         resourceType: '$_id.resourceType',
         usageUnit: '$_id.usageUnit',
         currency: '$_id.currency',
-        totalUsage: 1,
+        currentUsage: 1,
+        previousUsage: 1,
       },
     },
   ]).exec()
 
-  const [current, previous] = await Promise.all([
-    aggregatePeriod(input.startDate, input.endDate),
-    aggregatePeriod(previousStart, previousEnd),
-  ])
-  const previousMap = new Map(
-    previous.map((item) => [`${item.resourceType}|${item.usageUnit}|${item.currency}`, item.totalUsage]),
-  )
-  const keys = new Set([
-    ...current.map((item) => `${item.resourceType}|${item.usageUnit}|${item.currency}`),
-    ...previous.map((item) => `${item.resourceType}|${item.usageUnit}|${item.currency}`),
-  ])
-  const items = new Map<string, UsageComparisonItem>()
-  for (const item of [...current, ...previous]) {
-    const key = `${item.resourceType}|${item.usageUnit}|${item.currency}`
-    if (!items.has(key)) {
-      items.set(key, {
-        resourceType: item.resourceType,
-        usageUnit: item.usageUnit,
-        currency: item.currency,
-        currentUsage: 0,
-        previousUsage: 0,
-        percentageChange: null,
-      })
-    }
-  }
-  for (const item of current) {
-    const key = `${item.resourceType}|${item.usageUnit}|${item.currency}`
-    items.get(key)!.currentUsage = item.totalUsage
-  }
-  for (const item of previous) {
-    const key = `${item.resourceType}|${item.usageUnit}|${item.currency}`
-    items.get(key)!.previousUsage = item.totalUsage
-  }
-  return Array.from(items.values()).map((item) => {
-    const previousValue = previousMap.get(`${item.resourceType}|${item.usageUnit}|${item.currency}`) ?? 0
+  return rows.map((item) => {
     return {
-      ...item,
-      percentageChange: previousValue > 0
-        ? ((item.currentUsage - item.previousUsage) / previousValue) * 100
+      resourceType: item.resourceType,
+      usageUnit: item.usageUnit,
+      currency: item.currency,
+      currentUsage: item.currentUsage,
+      previousUsage: item.previousUsage,
+      percentageChange: item.previousUsage > 0
+        ? ((item.currentUsage - item.previousUsage) / item.previousUsage) * 100
         : null,
     }
   }).sort((a, b) => a.resourceType.localeCompare(b.resourceType))
@@ -511,29 +507,85 @@ export async function getSpendingComparison(
   const billingModel = getBillingTransactionModel(connection)
   const duration = input.endDate.getTime() - input.startDate.getTime()
   const previousStart = new Date(input.startDate.getTime() - duration)
-  const previousEnd = input.startDate
 
-  const aggregatePeriod = (startDate: Date, endDate: Date) => billingModel.aggregate<SpendingAmount>([
+  const rows = await billingModel.aggregate<{
+    currency: string
+    currentAmount: number
+    previousAmount: number
+    currentCount: number
+    previousCount: number
+  }>([
     {
       $match: {
         organizationId: input.organizationId,
         status: 'successful',
-        createdAt: { $gte: startDate, $lt: endDate },
+        createdAt: { $gte: previousStart, $lt: input.endDate },
       },
     },
-    { $group: { _id: '$currency', amount: { $sum: '$amount' } } },
-    { $project: { _id: 0, currency: '$_id', amount: 1 } },
+    {
+      $group: {
+        _id: '$currency',
+        currentAmount: {
+          $sum: {
+            $cond: [
+              { $gte: ['$createdAt', input.startDate] },
+              '$amount',
+              0,
+            ],
+          },
+        },
+        currentCount: {
+          $sum: {
+            $cond: [
+              { $gte: ['$createdAt', input.startDate] },
+              1,
+              0,
+            ],
+          },
+        },
+        previousAmount: {
+          $sum: {
+            $cond: [
+              { $lt: ['$createdAt', input.startDate] },
+              '$amount',
+              0,
+            ],
+          },
+        },
+        previousCount: {
+          $sum: {
+            $cond: [
+              { $lt: ['$createdAt', input.startDate] },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        currency: '$_id',
+        currentAmount: 1,
+        previousAmount: 1,
+        currentCount: 1,
+        previousCount: 1,
+      },
+    },
+    { $sort: { currency: 1 } },
   ]).exec()
 
-  const [current, previous] = await Promise.all([
-    aggregatePeriod(input.startDate, input.endDate),
-    aggregatePeriod(previousStart, previousEnd),
-  ])
-  const currencies = Array.from(new Set([...current, ...previous].map((item) => item.currency))).sort()
-  const difference = currencies.map((currency) => ({
-    currency,
-    amount: (current.find((item) => item.currency === currency)?.amount ?? 0)
-      - (previous.find((item) => item.currency === currency)?.amount ?? 0),
+  const current = rows
+    .filter((item) => item.currentCount > 0)
+    .map((item) => ({ currency: item.currency, amount: item.currentAmount }))
+  const previous = rows
+    .filter((item) => item.previousCount > 0)
+    .map((item) => ({ currency: item.currency, amount: item.previousAmount }))
+  const currencies = rows.map((item) => item.currency)
+  const difference = rows.map((item) => ({
+    currency: item.currency,
+    amount: item.currentAmount - item.previousAmount,
   }))
   return { current, previous, difference, currency: currencies }
 }

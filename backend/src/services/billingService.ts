@@ -33,12 +33,19 @@ export interface ListBillingTransactionsInput {
   limit: number
 }
 
+export type BillingTransactionListRecord = Pick<
+  BillingTransactionRecord,
+  'transactionId' | 'amount' | 'currency' | 'description' | 'status' | 'createdAt' | 'updatedAt'
+>
+
 export interface BillingTransactionPage {
-  transactions: BillingTransactionRecord[]
+  transactions: BillingTransactionListRecord[]
   page: number
   limit: number
   total: number
   totalPages: number
+  hasNextPage: boolean
+  hasPreviousPage: boolean
 }
 
 export class InvalidBillingRequestError extends Error {
@@ -72,6 +79,16 @@ export async function listBillingTransactions(
 
   const [transactions, total] = await Promise.all([
     BillingTransaction.find(filter)
+      .select({
+        transactionId: 1,
+        amount: 1,
+        currency: 1,
+        description: 1,
+        status: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        _id: 0,
+      })
       .sort({ createdAt: -1, transactionId: 1 })
       .skip((input.page - 1) * input.limit)
       .limit(input.limit)
@@ -86,6 +103,8 @@ export async function listBillingTransactions(
     limit: input.limit,
     total,
     totalPages: Math.ceil(total / input.limit),
+    hasNextPage: input.page < Math.ceil(total / input.limit),
+    hasPreviousPage: input.page > 1,
   }
 }
 

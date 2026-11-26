@@ -38,6 +38,8 @@ const resourcePage = {
   limit: 10,
   total: 1,
   totalPages: 1,
+  hasNextPage: false,
+  hasPreviousPage: false,
 }
 
 describe('analytics resource details route', () => {

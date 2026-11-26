@@ -141,12 +141,14 @@ export async function login(req: Request, res: Response): Promise<void> {
 
 export async function currentUser(req: AuthenticatedRequest, res: Response): Promise<void> {
   const user = await User.findById(req.auth?.userId)
+    .select('name email organizationId role')
   if (!user) {
     res.clearCookie(sessionCookie, { path: '/' })
     res.status(401).json({ message: 'Session is invalid or expired' })
     return
   }
   const organization = await Organization.findOne({ organizationId: user.organizationId })
+    .select('name -_id')
   res.json({ user: publicUser(user), organization: organization ? { name: organization.name } : null })
 }
 

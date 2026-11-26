@@ -27,17 +27,18 @@ const mocks = vi.hoisted(() => {
     aggregate: vi.fn(() => ({ exec: vi.fn(async () => []) })),
     distinct: vi.fn(async () => ['resource-1']),
   }
+  const billingModel = {
+    aggregate: vi.fn(() => ({ exec: vi.fn(async () => []) })),
+  }
 
-  return { createdRecords, findQuery, usageModel }
+  return { createdRecords, findQuery, usageModel, billingModel }
 })
 
 vi.mock('../src/models/UsageRecord.js', () => ({
   getUsageRecordModel: () => mocks.usageModel,
 }))
 vi.mock('../src/models/BillingTransaction.js', () => ({
-  getBillingTransactionModel: () => ({
-    aggregate: vi.fn(() => ({ exec: vi.fn(async () => []) })),
-  }),
+  getBillingTransactionModel: () => mocks.billingModel,
 }))
 
 import {
@@ -56,6 +57,7 @@ describe('analyticsService', () => {
     mocks.usageModel.find.mockClear()
     mocks.usageModel.countDocuments.mockClear()
     mocks.usageModel.aggregate.mockClear()
+    mocks.billingModel.aggregate.mockClear()
     mocks.usageModel.distinct.mockReset()
     mocks.usageModel.distinct.mockResolvedValue(['resource-1'])
     mocks.findQuery.exec.mockClear()
@@ -205,6 +207,116 @@ describe('analyticsService', () => {
     })
     expect(mocks.usageModel.aggregate).toHaveBeenCalledWith(expect.arrayContaining([
       { $match: { organizationId: 'org-1', resourceType: 'storage', recordedAt: { $gte: startDate, $lt: endDate } } },
+    ]))
+  })
+
+  it('compares current and previous usage periods with one tenant-scoped aggregation', async () => {
+    const startDate = new Date('2026-10-11T00:00:00.000Z')
+    const endDate = new Date('2026-10-21T00:00:00.000Z')
+    mocks.usageModel.aggregate.mockImplementationOnce(() => ({
+      exec: vi.fn(async () => [
+        {
+          resourceType: 'compute',
+          usageUnit: 'hours',
+          currency: 'USD',
+          currentUsage: 15,
+          previousUsage: 10,
+        },
+        {
+          resourceType: 'compute',
+          usageUnit: 'GB',
+          currency: 'USD',
+          currentUsage: 2,
+          previousUsage: 0,
+        },
+      ]),
+    }))
+
+    const { getUsageComparison } = await import('../src/services/analyticsService.js')
+    const result = await getUsageComparison(connection, {
+      organizationId: 'org-1',
+      startDate,
+      endDate,
+      resourceType: 'compute',
+    })
+
+    expect(result).toEqual([{
+      resourceType: 'compute',
+      usageUnit: 'hours',
+      currency: 'USD',
+      currentUsage: 15,
+      previousUsage: 10,
+      percentageChange: 50,
+    }, {
+      resourceType: 'compute',
+      usageUnit: 'GB',
+      currency: 'USD',
+      currentUsage: 2,
+      previousUsage: 0,
+      percentageChange: null,
+    }])
+    expect(mocks.usageModel.aggregate).toHaveBeenCalledTimes(1)
+    expect(mocks.usageModel.aggregate).toHaveBeenCalledWith(expect.arrayContaining([
+      {
+        $match: {
+          organizationId: 'org-1',
+          resourceType: 'compute',
+          recordedAt: {
+            $gte: new Date('2026-10-01T00:00:00.000Z'),
+            $lt: endDate,
+          },
+        },
+      },
+    ]))
+  })
+
+  it('compares current and previous spending periods with one tenant-scoped aggregation', async () => {
+    const startDate = new Date('2026-10-11T00:00:00.000Z')
+    const endDate = new Date('2026-10-21T00:00:00.000Z')
+    mocks.billingModel.aggregate.mockImplementationOnce(() => ({
+      exec: vi.fn(async () => [
+        {
+          currency: 'INR',
+          currentAmount: 0,
+          previousAmount: 0,
+          currentCount: 1,
+          previousCount: 0,
+        },
+        {
+          currency: 'USD',
+          currentAmount: 150,
+          previousAmount: 100,
+          currentCount: 1,
+          previousCount: 1,
+        },
+      ]),
+    }))
+
+    const { getSpendingComparison } = await import('../src/services/analyticsService.js')
+    const result = await getSpendingComparison(connection, {
+      organizationId: 'org-1',
+      startDate,
+      endDate,
+    })
+
+    expect(result).toEqual({
+      current: [{ currency: 'INR', amount: 0 }, { currency: 'USD', amount: 150 }],
+      previous: [{ currency: 'USD', amount: 100 }],
+      difference: [{ currency: 'INR', amount: 0 }, { currency: 'USD', amount: 50 }],
+      currency: ['INR', 'USD'],
+    })
+    expect(mocks.billingModel.aggregate).toHaveBeenCalledTimes(1)
+    expect(mocks.billingModel.aggregate).toHaveBeenCalledWith(expect.arrayContaining([
+      {
+        $match: {
+          organizationId: 'org-1',
+          status: 'successful',
+          createdAt: {
+            $gte: new Date('2026-10-01T00:00:00.000Z'),
+            $lt: endDate,
+          },
+        },
+      },
     ]))
   })
 })

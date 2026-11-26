@@ -24,6 +24,8 @@ const transactions: BillingTransactionPage = {
   limit: 10,
   total: 1,
   totalPages: 1,
+  hasNextPage: false,
+  hasPreviousPage: false,
 }
 
 describe('Billing ledger Indian formatting', () => {

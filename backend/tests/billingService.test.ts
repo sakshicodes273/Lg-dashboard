@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => {
       }
     }),
     find: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
       sort: vi.fn().mockReturnThis(),
       skip: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
@@ -210,6 +211,9 @@ describe('createBillingTransaction', () => {
     const { listBillingTransactions } = await import('../src/services/billingService.js')
     const startDate = new Date('2026-10-01T00:00:00.000Z')
     const endDate = new Date('2026-11-01T00:00:00.000Z')
+    mocks.billingModel.countDocuments.mockReturnValueOnce({
+      exec: vi.fn(async () => 21),
+    })
 
     const result = await listBillingTransactions(connection, {
       organizationId: 'org-1',
@@ -225,7 +229,30 @@ describe('createBillingTransaction', () => {
       status: 'successful',
       createdAt: { $gte: startDate, $lt: endDate },
     })
-    expect(result).toEqual({ transactions: [], page: 2, limit: 10, total: 0, totalPages: 0 })
+    expect(result).toEqual({
+      transactions: [],
+      page: 2,
+      limit: 10,
+      total: 21,
+      totalPages: 3,
+      hasNextPage: true,
+      hasPreviousPage: true,
+    })
+    expect(mocks.billingModel.find).toHaveBeenCalledWith({
+      organizationId: 'org-1',
+      status: 'successful',
+      createdAt: { $gte: startDate, $lt: endDate },
+    })
+    expect(mocks.billingModel.find.mock.results[0].value.select).toHaveBeenCalledWith({
+      transactionId: 1,
+      amount: 1,
+      currency: 1,
+      description: 1,
+      status: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      _id: 0,
+    })
   })
 
   it('does not turn a committed transaction into a failed request if lock release errors', async () => {
