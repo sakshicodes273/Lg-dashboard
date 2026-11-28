@@ -1,10 +1,12 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { DashboardLayout } from './layouts/DashboardLayout'
-import { BillingLedger } from './pages/BillingLedger'
-import { Dashboard } from './pages/Dashboard'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
+
+const Dashboard = lazy(() => import('./pages/Dashboard').then(({ Dashboard: page }) => ({ default: page })))
+const BillingLedger = lazy(() => import('./pages/BillingLedger').then(({ BillingLedger: page }) => ({ default: page })))
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth()
@@ -13,11 +15,13 @@ function ProtectedRoutes() {
 
   return (
     <DashboardLayout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/billing" element={<BillingLedger />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="analytics-state" role="status"><span className="loader" /> Loading page…</div>}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/billing" element={<BillingLedger />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </DashboardLayout>
   )
 }

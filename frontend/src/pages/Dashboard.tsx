@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, CalendarDays, CircleDollarSign, Download, Gauge, HardDrive, RefreshCw } from 'lucide-react'
+import { Boxes, CalendarDays, CircleDollarSign, CreditCard, Download, Gauge, HardDrive, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   Area,
@@ -140,6 +140,7 @@ export function Dashboard() {
   const [startDate, setStartDate] = useState(initialRange.startDate)
   const [endDate, setEndDate] = useState(initialRange.endDate)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [resourceRefreshKey, setResourceRefreshKey] = useState(0)
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [resourceDetails, setResourceDetails] = useState<ResourceDetailsPage | null>(null)
   const [usageComparison, setUsageComparison] = useState<UsageComparisonItem[]>([])
@@ -257,7 +258,7 @@ export function Dashboard() {
       })
 
     return () => controller.abort()
-  }, [startDate, endDate, resourceType, resourceSort, resourceOrder, resourcePage, refreshKey])
+  }, [startDate, endDate, resourceType, resourceSort, resourceOrder, resourcePage, refreshKey, resourceRefreshKey])
 
   const usageTotals = useMemo(
     () => analytics ? sumUsageByUnit(analytics.resourceConsumption) : [],
@@ -330,6 +331,12 @@ export function Dashboard() {
     setResourceLoading(true)
     setError(null)
     setRefreshKey((current) => current + 1)
+  }
+
+  function retryResourceAnalytics() {
+    setResourceLoading(true)
+    setApiErrors((current) => ({ ...current, resources: null }))
+    setResourceRefreshKey((current) => current + 1)
   }
 
   async function exportResourceAnalytics() {
@@ -452,7 +459,7 @@ export function Dashboard() {
           <button className="export-button" type="button" onClick={() => void exportResourceAnalytics()} disabled={exporting || loading || resourceLoading} title="Export filtered resource analytics as CSV">
             <Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
-          <Link className="export-button dashboard-billing-link" to="/billing">Billing ledger</Link>
+          <Link className="export-button dashboard-billing-link" to="/billing"><CreditCard size={15} /><span>Billing ledger</span></Link>
         </div>
       </div>
 
@@ -814,7 +821,11 @@ export function Dashboard() {
             {resourceLoading ? (
               <div className="ledger-state" role="status"><span className="loader" /> Loading resource analytics…</div>
             ) : apiErrors.resources ? (
-              <div className="ledger-state ledger-error" role="alert">{apiErrors.resources}</div>
+              <div className="ledger-state ledger-error" role="alert">
+                <strong>Couldn&apos;t load resource analytics</strong>
+                <span>{apiErrors.resources}</span>
+                <button type="button" onClick={retryResourceAnalytics}>Try again</button>
+              </div>
             ) : resourceDetails?.data.length === 0 ? (
               <div className="ledger-state ledger-empty">
                 <strong>No resource analytics found</strong>

@@ -133,6 +133,36 @@ describe('Dashboard analytics', () => {
     expect(await screen.findByText('Usage comparison unavailable')).toBeTruthy()
   })
 
+  it('retries resource analytics without refetching dashboard analytics', async () => {
+    let resourceRequestCount = 0
+    request.mockImplementation(async (path) => {
+      if (path.startsWith('/analytics/resource-details')) {
+        resourceRequestCount += 1
+        if (resourceRequestCount === 1) throw new Error('Resource analytics unavailable')
+        return {
+          success: true,
+          data: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        }
+      }
+      return populatedAnalytics
+    })
+
+    renderDashboard()
+
+    expect(await screen.findByText('Resource analytics unavailable')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(resourceRequestCount).toBe(2))
+    expect(request.mock.calls.filter(([path]) => path.startsWith('/dashboard?'))).toHaveLength(1)
+    expect(await screen.findByText('No resource analytics found')).toBeTruthy()
+  })
+
   it('downloads a CSV using the selected date and resource filters', async () => {
     request.mockResolvedValue(populatedAnalytics)
     download.mockResolvedValue(undefined)
